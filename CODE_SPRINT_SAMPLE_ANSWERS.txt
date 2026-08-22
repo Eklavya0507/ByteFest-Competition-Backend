@@ -1,0 +1,21 @@
+BYTEFEST 2026 - CODE SPRINT TEMPORARY SAMPLE ANSWERS
+====================================================
+These are temporary questions/answers for testing the system.
+Replace them later only in: config/codesprintQuestions.js
+
+Round 1
+Stage 1: 42
+Stage 2: 17
+Stage 3: 75
+
+Round 2
+Stage 1: 21
+Stage 2: 20
+Stage 3: 101001
+
+Qualifier: 101
+Semifinal: 28
+Wildcard Entry: 63
+Wildcard Entry Final: 3
+Final Wildcard Match: 55
+Grand Final: 794
