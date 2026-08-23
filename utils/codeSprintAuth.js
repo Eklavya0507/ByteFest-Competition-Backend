@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const CodeSprintTeam = require("../models/CodeSprintTeam");
+const { makeCompetitionPassword } = require("./competitionPassword");
 
 const TOKEN_LIFETIME_SECONDS = 8 * 60 * 60;
 
@@ -24,19 +25,14 @@ function hashPassword(password) {
 }
 
 function makeTeamPassword(teamName, teamId) {
-    const firstWord = String(teamName || "Team")
-        .trim()
-        .split(/\s+/)[0]
-        .replace(/[^a-z0-9]/gi, "") || "Team";
-    const cleanWord = firstWord.charAt(0).toUpperCase() + firstWord.slice(1).toLowerCase();
-    const number = String(teamId || "").match(/(\d+)$/)?.[1] || "000";
-    return `${cleanWord}@${number}`;
+    return makeCompetitionPassword({ registrationId: teamId, teamName, event: "Code Sprint" });
 }
 
 function createTeamToken(team) {
     const now = Math.floor(Date.now() / 1000);
     const payload = Buffer.from(JSON.stringify({
         teamId: team.teamId,
+        event: "Code Sprint",
         role: "codesprint-team",
         iat: now,
         exp: now + TOKEN_LIFETIME_SECONDS
@@ -73,10 +69,4 @@ async function requireTeam(req, res, next) {
     }
 }
 
-module.exports = {
-    createTeamToken,
-    hashPassword,
-    makeTeamPassword,
-    requireTeam,
-    safeEqual
-};
+module.exports = { createTeamToken, hashPassword, makeTeamPassword, requireTeam, safeEqual };

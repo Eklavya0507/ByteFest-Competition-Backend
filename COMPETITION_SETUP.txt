@@ -1,0 +1,63 @@
+BYTEFEST 2026 COMPETITION SYSTEM - COMPLETE BUILD
+
+REPOS TO UPDATE
+1) Frontend repo: ByteFest-Competition-2026
+2) Backend repo: ByteFest-Competition-Backend
+
+REGISTRATION BACKEND
+No new code change is required for this competition build.
+The competition backend reads approved registrations directly from the existing registration MongoDB using a second read-only-style connection.
+
+IMPORTANT NEW RENDER ENVIRONMENT VARIABLE
+Add this to ByteFest-Competition-Backend Render service:
+REGISTRATION_MONGODB_URI = copy the EXACT MONGODB_URI value from your existing BYTEFEST registration backend Render service.
+
+Keep existing competition variables:
+MONGODB_URI
+ADMIN_SECRET
+ADMIN_LOGIN_PASSWORD
+CODESPRINT_SECRET
+CODESPRINT_COORDINATOR_PASSWORD
+FRONTEND_ORIGINS
+
+Add Bug Hunt variables:
+BUGHUNT_SECRET = any long random secret
+BUGHUNT_COORDINATOR_PASSWORD = coordinator unlock password
+
+PARTICIPANT LOGIN
+One login page: participant-login.html
+Fields: Event + Registration ID + Password
+Password formula: FirstWordOfTeamName@Last5CharactersOfRegistrationID
+Example: Code Warriors + BF26-A7C91D42 -> Code@91D42
+Only PAID / approved registrations can enter.
+If the selected event does not match the registration, login is rejected.
+If an old registration has no Team Name, participant is told to contact the coordinator.
+
+NAVIGATION
+Participant Login: no visible Back option and browser-back is blocked while entering/playing.
+Admin Login: has Back to Competition Portal.
+
+ADMIN
+No Create Team form.
+Admin lists approved registrations from the registration database and merges them with live competition state.
+Shows Registration ID, Team Name, generated Password, members, round/stage, scores, hints, rank and security state.
+
+BUG HUNT FLOW
+Admin presses START BUG HUNT once.
+Then timing is automatic with no transition gaps:
+Round 1 Bug Radar: 35 min, 3 stages
+Round 2 Patch It: 40 min, 2 stages
+Round 3 Hidden Failure: 50 min, 2 stages
+Surprise Bug Drop: 20 min, 1 challenge
+Ranking: automatic, 0 min
+Top 3 Final Critical Debug: 15 min, 1 challenge
+Final winner is primarily decided by Final performance; qualification score is a late tie-break.
+
+QUESTIONS
+Code Sprint questions: backend/config/codesprintQuestions.js
+Bug Hunt questions: backend/config/bughuntQuestions.js
+Temporary test questions are included now and can be replaced later without changing pages/routes.
+
+FRONTEND BACKEND URL
+config.js already uses:
+https://bytefest-competition-backend.onrender.com
