@@ -8,6 +8,15 @@ const captureSchema = new mongoose.Schema({
     queen: { type: Number, default: 0 }
 }, { _id: false });
 
+
+const securityEventSchema = new mongoose.Schema({
+    reason: { type: String, default: "" },
+    detail: { type: String, default: "" },
+    at: { type: Date, default: Date.now },
+    unlockedAt: { type: Date, default: null },
+    unlockedBy: { type: String, default: "" }
+}, { _id: false });
+
 const moveSchema = new mongoose.Schema({
     color: { type: String, enum: ["white", "black"], required: true },
     capturedPiece: { type: String, default: "" },
@@ -60,6 +69,14 @@ const schema = new mongoose.Schema({
     lastMoveNotation: { type: String, default: "" },
 
     pausedByEvent: { type: Boolean, default: false },
+    pausedBySecurity: { type: Boolean, default: false },
+
+    security: {
+        violations: { type: Number, default: 0 },
+        locked: { type: Boolean, default: false },
+        lockReason: { type: String, default: "" },
+        events: { type: [securityEventSchema], default: [] }
+    },
 
     result: {
         type: String,

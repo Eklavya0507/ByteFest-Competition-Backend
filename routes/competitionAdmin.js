@@ -521,8 +521,69 @@ router.post("/checkmate/match/:id/resume", requireAdmin, async (req, res) => {
 
         const match = await CheckmateMatch.findById(req.params.id);
         if (!match) return res.status(404).json({ message: "Match not found" });
+        if (match.security?.locked) {
+            return res.status(423).json({ message: "Security locked. Use UNLOCK first." });
+        }
         await resumeMatch(match);
         res.json({ message: "Match resumed." });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+
+router.patch("/checkmate/match/:id/security", requireAdmin, async (req, res) => {
+    try {
+        const action = clean(req.body?.action).toLowerCase();
+        if (!["lock", "unlock"].includes(action)) {
+            return res.status(400).json({ message: "Use lock or unlock" });
+        }
+
+        const match = await CheckmateMatch.findById(req.params.id);
+        if (!match) return res.status(404).json({ message: "Match not found" });
+        if (match.status === "completed") return res.status(409).json({ message: "Match already completed" });
+
+        if (!match.security) {
+            match.security = { violations: 0, locked: false, lockReason: "", events: [] };
+        }
+
+        if (action === "lock") {
+            if (match.status === "running") {
+                commitElapsed(match);
+                match.status = "paused";
+                match.pausedBySecurity = true;
+                match.turnStartedAt = null;
+            }
+            match.security.locked = true;
+            match.security.lockReason = "Locked by admin";
+            match.security.events.push({
+                reason: match.security.lockReason,
+                detail: "Admin dashboard security lock",
+                at: new Date()
+            });
+        } else {
+            match.security.locked = false;
+            match.security.lockReason = "";
+            const last = match.security.events?.[match.security.events.length - 1];
+            if (last) {
+                last.unlockedAt = new Date();
+                last.unlockedBy = "admin";
+            }
+
+            const control = await getEventControl("Checkmate");
+            if (match.pausedBySecurity) {
+                match.pausedBySecurity = false;
+                if (control.status === "running") {
+                    match.status = "running";
+                    match.turnStartedAt = new Date();
+                }
+            }
+        }
+
+        match.markModified("security");
+        await match.save();
+        res.json({ message: action === "lock" ? "Checkmate station locked." : "Checkmate station unlocked." });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Server error" });

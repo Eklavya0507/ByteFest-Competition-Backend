@@ -51,3 +51,5 @@ Required:
 
 Use a separate competition database, for example:
 `bytefest_competition`
+
+- `CHECKMATE_COORDINATOR_PASSWORD` — unlocks a Checkmate station after fullscreen/security violation. If omitted, Code Sprint coordinator password is used as fallback.

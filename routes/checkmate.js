@@ -15,6 +15,7 @@ const {
 } = require("../utils/checkmateService");
 
 const router = express.Router();
+const MAX_VIOLATIONS = 4;
 
 async function eventControl() {
     return EventControl.findOneAndUpdate(
@@ -93,6 +94,17 @@ router.get("/state", requirePlayer, async (req, res) => {
                 materialDifferential: Number(player.materialFor || 0) - Number(player.materialAgainst || 0)
             },
             match: publicData,
+            security: match ? {
+                violations: Number(match.security?.violations || 0),
+                maxViolations: MAX_VIOLATIONS,
+                locked: Boolean(match.security?.locked),
+                lockReason: match.security?.lockReason || ""
+            } : {
+                violations: 0,
+                maxViolations: MAX_VIOLATIONS,
+                locked: false,
+                lockReason: ""
+            },
             you
         });
     } catch (error) {
@@ -111,6 +123,13 @@ router.post("/move", requirePlayer, async (req, res) => {
 
         await checkTimeout(match);
         match = await CheckmateMatch.findById(match._id);
+
+        if (match.security?.locked) {
+            return res.status(423).json({
+                message: "Checkmate station is security locked. Coordinator unlock required.",
+                locked: true
+            });
+        }
 
         if (match.status !== "running") {
             return res.status(409).json({ message: match.status === "completed" ? "Match is already completed" : "Match is not running" });
@@ -205,6 +224,137 @@ router.post("/move", requirePlayer, async (req, res) => {
     } catch (error) {
         console.error("Checkmate move error:", error);
         res.status(error.status || 500).json({ message: error.status ? error.message : "Server error" });
+    }
+});
+
+
+router.post("/security/violation", requirePlayer, async (req, res) => {
+    try {
+        const player = req.checkmatePlayer;
+        const match = await currentMatch(player.registrationId);
+        if (!match) return res.status(404).json({ message: "No active Checkmate match" });
+        if (match.status === "completed") return res.status(409).json({ message: "Match is already completed" });
+
+        if (match.security?.locked) {
+            return res.json({
+                locked: true,
+                violations: Number(match.security?.violations || 0),
+                maxViolations: MAX_VIOLATIONS,
+                message: "Checkmate station is already locked"
+            });
+        }
+
+        if (!match.security) {
+            match.security = { violations: 0, locked: false, lockReason: "", events: [] };
+        }
+
+        // Only running play is treated as a security violation.
+        // While waiting or coordinator-paused, leaving fullscreen does not penalize players.
+        if (match.status !== "running") {
+            return res.json({
+                locked: false,
+                violations: Number(match.security.violations || 0),
+                maxViolations: MAX_VIOLATIONS,
+                message: "Match is not running; no violation recorded"
+            });
+        }
+
+        commitElapsed(match);
+        match.status = "paused";
+        match.pausedBySecurity = true;
+        match.turnStartedAt = null;
+
+        match.security.violations = Math.min(
+            MAX_VIOLATIONS,
+            Number(match.security.violations || 0) + 1
+        );
+        match.security.locked = true;
+        match.security.lockReason = clean(req.body?.reason) || "Fullscreen exited";
+        match.security.events.push({
+            reason: match.security.lockReason,
+            detail: clean(req.body?.detail),
+            at: new Date()
+        });
+
+        match.markModified("security");
+        await match.save();
+
+        return res.json({
+            locked: true,
+            violations: match.security.violations,
+            maxViolations: MAX_VIOLATIONS,
+            coordinatorDecisionRequired: match.security.violations >= MAX_VIOLATIONS,
+            message: `Checkmate security violation ${match.security.violations}/${MAX_VIOLATIONS}. Coordinator password required.`
+        });
+    } catch (error) {
+        console.error("Checkmate security violation error:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+router.post("/security/unlock", requirePlayer, async (req, res) => {
+    try {
+        const required = String(
+            process.env.CHECKMATE_COORDINATOR_PASSWORD ||
+            process.env.CODESPRINT_COORDINATOR_PASSWORD ||
+            ""
+        );
+        if (!required) {
+            return res.status(503).json({
+                message: "CHECKMATE_COORDINATOR_PASSWORD is not configured"
+            });
+        }
+
+        const password = clean(req.body?.password);
+        const { safeEqual } = require("../utils/checkmateAuth");
+        if (!safeEqual(password, required)) {
+            return res.status(403).json({ message: "Incorrect coordinator password" });
+        }
+
+        const player = req.checkmatePlayer;
+        const match = await currentMatch(player.registrationId);
+        if (!match) return res.status(404).json({ message: "No active Checkmate match" });
+
+        if (!match.security?.locked) {
+            return res.json({
+                unlocked: true,
+                violations: Number(match.security?.violations || 0),
+                maxViolations: MAX_VIOLATIONS,
+                message: "Checkmate station is already unlocked"
+            });
+        }
+
+        match.security.locked = false;
+        match.security.lockReason = "";
+
+        const events = match.security.events || [];
+        const last = events[events.length - 1];
+        if (last) {
+            last.unlockedAt = new Date();
+            last.unlockedBy = "coordinator";
+        }
+
+        const control = await eventControl();
+        if (match.pausedBySecurity) {
+            match.pausedBySecurity = false;
+            if (control.status === "running") {
+                match.status = "running";
+                match.turnStartedAt = new Date();
+            }
+        }
+
+        match.markModified("security");
+        await match.save();
+
+        return res.json({
+            unlocked: true,
+            violations: Number(match.security.violations || 0),
+            maxViolations: MAX_VIOLATIONS,
+            message: "Checkmate unlocked. Return to fullscreen to continue."
+        });
+    } catch (error) {
+        console.error("Checkmate security unlock error:", error);
+        res.status(500).json({ message: "Server error" });
     }
 });
 

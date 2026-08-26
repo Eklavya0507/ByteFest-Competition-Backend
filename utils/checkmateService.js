@@ -192,7 +192,14 @@ function publicMatch(match, whitePlayer = null, blackPlayer = null) {
         lastMoveNotation: match.lastMoveNotation || "",
         result: match.result,
         resultReason: match.resultReason,
-        winnerRegistrationId: match.winnerRegistrationId
+        winnerRegistrationId: match.winnerRegistrationId,
+        security: {
+            violations: Number(match.security?.violations || 0),
+            maxViolations: 4,
+            locked: Boolean(match.security?.locked),
+            lockReason: match.security?.lockReason || ""
+        },
+        pausedBySecurity: Boolean(match.pausedBySecurity)
     };
 }
 
