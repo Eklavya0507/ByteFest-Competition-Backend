@@ -1,10 +1,53 @@
-# BYTEFEST 2026 Competition Backend v2
+# BYTEFEST Competition Backend
 
-One backend for Code Sprint and Bug Hunt. Participant accounts come from the existing registration MongoDB; the competition admin does not manually create teams.
+This is a NEW standalone backend repository for the BYTEFEST competition portal.
 
-## Important Render environment variable
-Copy the exact `MONGODB_URI` from the existing registration backend into this service as `REGISTRATION_MONGODB_URI`. Keep this service's own `MONGODB_URI` pointed at the competition database.
+It does **not** modify or depend on the registration backend.
 
-Participant password: `FirstWordOfTeamName@Last5OfRegistrationID`. Example: `Code Warriors` + `BF26-A7C91D42` -> `Code@91D42`.
+## One backend repo for all competition events
+Use this same backend repository for:
+- Code Sprint
+- Bug Hunt (add later)
+- Checkmate (add later)
 
-Bug Hunt schedule after Admin presses Start once: 35m Round 1 -> 40m Round 2 -> 50m Round 3 -> 20m Surprise -> automatic Top 3 -> 15m Final.
+## Code Sprint included now
+- Team ID + generated password
+- Round 1 / Round 2 / Qualifier
+- Automatic stage and round progression
+- Hints with penalties
+- Ranking
+- Parallel Semifinal + Wildcard Entry
+- Entry Final / Final Wildcard / 3-team Grand Final
+- Fullscreen security violation logging
+- 4 coordinator unlocks, then next violation disqualifies
+- Admin team creation/list/delete
+- Projector leaderboard
+
+## Change questions later
+Edit only:
+
+`config/codesprintQuestions.js`
+
+Correct answers stay on the backend and are not sent to participant source code.
+
+## Render setup
+Create a NEW Render Web Service connected to this repository.
+
+Build command:
+`npm install`
+
+Start command:
+`npm start`
+
+Copy `.env.example` keys into Render Environment.
+
+Required:
+- `MONGODB_URI`
+- `ADMIN_SECRET`
+- `ADMIN_LOGIN_PASSWORD`
+- `CODESPRINT_SECRET`
+- `CODESPRINT_COORDINATOR_PASSWORD`
+- `FRONTEND_ORIGINS`
+
+Use a separate competition database, for example:
+`bytefest_competition`

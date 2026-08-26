@@ -1,7 +1,7 @@
 {
   "name": "bytefest-competition-backend",
-  "version": "2.0.0",
-  "description": "BYTEFEST 2026 Code Sprint + Bug Hunt competition backend",
+  "version": "3.0.0",
+  "description": "BYTEFEST 2026 Code Sprint + Bug Hunt + Checkmate competition backend",
   "private": true,
   "main": "server.js",
   "scripts": {
@@ -9,9 +9,7 @@
     "dev": "nodemon server.js",
     "check": "node --check server.js && find routes utils models config -name '*.js' -print0 | xargs -0 -n1 node --check"
   },
-  "engines": {
-    "node": ">=20.19.0"
-  },
+  "engines": { "node": ">=20.19.0" },
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.6",
@@ -19,7 +17,5 @@
     "express": "^5.2.1",
     "mongoose": "^9.9.2"
   },
-  "devDependencies": {
-    "nodemon": "^3.1.14"
-  }
+  "devDependencies": { "nodemon": "^3.1.14" }
 }

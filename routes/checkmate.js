@@ -1,0 +1,208 @@
+const express = require("express");
+const CheckmateMatch = require("../models/CheckmateMatch");
+const CheckmatePlayer = require("../models/CheckmatePlayer");
+const EventControl = require("../models/EventControl");
+const { requirePlayer } = require("../utils/checkmateAuth");
+const {
+    PIECE_VALUES,
+    CAPTURE_LIMITS,
+    clean,
+    commitElapsed,
+    checkTimeout,
+    materialAdjudicationIfNeeded,
+    finalizeMatch,
+    publicMatch
+} = require("../utils/checkmateService");
+
+const router = express.Router();
+
+async function eventControl() {
+    return EventControl.findOneAndUpdate(
+        { event: "Checkmate" },
+        { $setOnInsert: { event: "Checkmate" } },
+        { upsert: true, new: true }
+    );
+}
+
+async function currentMatch(registrationId) {
+    return CheckmateMatch.findOne({
+        $or: [
+            { whiteRegistrationId: registrationId },
+            { blackRegistrationId: registrationId }
+        ],
+        status: { $in: ["waiting", "running", "paused"] }
+    }).sort({ createdAt: -1 });
+}
+
+async function ensureRunningEvent() {
+    const control = await eventControl();
+    if (control.status === "not_started") {
+        const error = new Error("Checkmate has not started yet");
+        error.status = 409;
+        throw error;
+    }
+    if (control.status === "paused") {
+        const error = new Error("Checkmate is stopped by the coordinator");
+        error.status = 423;
+        throw error;
+    }
+    return control;
+}
+
+router.get("/state", requirePlayer, async (req, res) => {
+    try {
+        const player = req.checkmatePlayer;
+        const control = await eventControl();
+        let match = await currentMatch(player.registrationId);
+
+        if (match && match.status === "running") {
+            await checkTimeout(match);
+            match = await CheckmateMatch.findById(match._id);
+        }
+
+        let publicData = null;
+        let you = null;
+
+        if (match) {
+            const [whitePlayer, blackPlayer] = await Promise.all([
+                CheckmatePlayer.findOne({ registrationId: match.whiteRegistrationId }),
+                CheckmatePlayer.findOne({ registrationId: match.blackRegistrationId })
+            ]);
+
+            publicData = publicMatch(match, whitePlayer, blackPlayer);
+            you = {
+                color: match.whiteRegistrationId === player.registrationId ? "white" : "black"
+            };
+        }
+
+        return res.json({
+            eventControl: {
+                status: control.status,
+                startedAt: control.startedAt,
+                pausedAt: control.pausedAt
+            },
+            player: {
+                registrationId: player.registrationId,
+                playerName: player.playerName,
+                tournamentPoints: player.tournamentPoints,
+                wins: player.wins,
+                draws: player.draws,
+                losses: player.losses,
+                rank: player.rank,
+                capturePoints: player.capturePoints,
+                materialDifferential: Number(player.materialFor || 0) - Number(player.materialAgainst || 0)
+            },
+            match: publicData,
+            you
+        });
+    } catch (error) {
+        console.error("Checkmate state error:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+router.post("/move", requirePlayer, async (req, res) => {
+    try {
+        await ensureRunningEvent();
+
+        const player = req.checkmatePlayer;
+        let match = await currentMatch(player.registrationId);
+        if (!match) return res.status(404).json({ message: "No active Checkmate match" });
+
+        await checkTimeout(match);
+        match = await CheckmateMatch.findById(match._id);
+
+        if (match.status !== "running") {
+            return res.status(409).json({ message: match.status === "completed" ? "Match is already completed" : "Match is not running" });
+        }
+
+        const myColor = match.whiteRegistrationId === player.registrationId ? "white" : "black";
+        if (match.activeColor !== myColor) return res.status(409).json({ message: "It is not your turn" });
+
+        const capturedPiece = clean(req.body?.capturedPiece).toLowerCase();
+        if (capturedPiece && !PIECE_VALUES[capturedPiece]) {
+            return res.status(400).json({ message: "Invalid captured piece" });
+        }
+
+        commitElapsed(match);
+
+        if (myColor === "white" && match.whiteTimeMs <= 0) {
+            await finalizeMatch(match, "black_win", "White time expired");
+            return res.json({ completed: true, message: "Time expired. Black wins." });
+        }
+        if (myColor === "black" && match.blackTimeMs <= 0) {
+            await finalizeMatch(match, "white_win", "Black time expired");
+            return res.json({ completed: true, message: "Time expired. White wins." });
+        }
+
+        // BYTEFEST Checkmate time control: 8+3.
+        // The player receives +3 seconds after successfully completing a move.
+        const incrementMs = Number(match.incrementMs || 3000);
+        if (myColor === "white") match.whiteTimeMs += incrementMs;
+        else match.blackTimeMs += incrementMs;
+
+        let capturedValue = 0;
+        if (capturedPiece) {
+            const captures = myColor === "white" ? match.whiteCaptured : match.blackCaptured;
+            const count = Number(captures[capturedPiece] || 0);
+            if (count >= CAPTURE_LIMITS[capturedPiece]) {
+                return res.status(409).json({ message: `Maximum ${capturedPiece} captures already recorded` });
+            }
+
+            captures[capturedPiece] = count + 1;
+            capturedValue = PIECE_VALUES[capturedPiece];
+
+            if (myColor === "white") match.blackMaterial = Math.max(0, match.blackMaterial - capturedValue);
+            else match.whiteMaterial = Math.max(0, match.whiteMaterial - capturedValue);
+        }
+
+        if (myColor === "white") match.whiteMoves += 1;
+        else match.blackMoves += 1;
+
+        match.moves.push({
+            color: myColor,
+            capturedPiece,
+            capturedValue,
+            whiteMaterial: match.whiteMaterial,
+            blackMaterial: match.blackMaterial,
+            at: new Date()
+        });
+
+        match.activeColor = myColor === "white" ? "black" : "white";
+        match.turnStartedAt = new Date();
+        await match.save();
+
+        await materialAdjudicationIfNeeded(match);
+        const fresh = await CheckmateMatch.findById(match._id);
+
+        return res.json({
+            completed: fresh.status === "completed",
+            message: fresh.status === "completed"
+                ? `${fresh.result.replaceAll("_", " ").toUpperCase()} · ${fresh.resultReason}`
+                : `Move recorded${capturedPiece ? ` · captured ${capturedPiece} (${capturedValue} pt)` : ""}.`
+        });
+    } catch (error) {
+        console.error("Checkmate move error:", error);
+        res.status(error.status || 500).json({ message: error.status ? error.message : "Server error" });
+    }
+});
+
+router.post("/resign", requirePlayer, async (req, res) => {
+    try {
+        await ensureRunningEvent();
+
+        const player = req.checkmatePlayer;
+        const match = await currentMatch(player.registrationId);
+        if (!match) return res.status(404).json({ message: "No active Checkmate match" });
+        if (match.status !== "running") return res.status(409).json({ message: "Match is not running" });
+
+        const result = match.whiteRegistrationId === player.registrationId ? "black_win" : "white_win";
+        await finalizeMatch(match, result, `${player.playerName} resigned`);
+        res.json({ message: "Resignation recorded" });
+    } catch (error) {
+        console.error("Checkmate resign error:", error);
+        res.status(error.status || 500).json({ message: error.status ? error.message : "Server error" });
+    }
+});
+
+module.exports = router;

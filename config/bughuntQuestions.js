@@ -1,12 +1,9 @@
 /*
  * BYTEFEST 2026 - BUG HUNT QUESTION BANK
- * ------------------------------------------------------------
  * Replace questions, answers, points and hints ONLY in this file.
- * The website / routes do not need to be rewritten when questions change.
- * Current content is a temporary test bank.
  */
-const HINTS = [10,20,30];
-function hints(a,b,c){return [{text:a,penalty:HINTS[0]},{text:b,penalty:HINTS[1]},{text:c,penalty:HINTS[2]}];}
+const HINTS=[10,20,30];
+function hints(a,b,c){return[{text:a,penalty:HINTS[0]},{text:b,penalty:HINTS[1]},{text:c,penalty:HINTS[2]}]}
 module.exports={
  round1:{title:"Round 1 - Bug Radar",durationSeconds:35*60,stages:[
   {id:"bh-r1s1",title:"Stage 1 - Spot the Issue",maxPoints:100,prompt:"The loop should print 1 to 5, but the condition is written i < 5. What should the condition be? Enter only the corrected condition.",placeholder:"Example: i <= 5",answers:["i <= 5","i<=5"],hints:hints("The current loop stops before 5.","Think about inclusive comparison.","Use <= instead of <.")},

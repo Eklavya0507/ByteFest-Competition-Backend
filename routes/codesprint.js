@@ -528,9 +528,25 @@ router.post("/security/violation", requireTeam, async (req, res) => {
             });
         }
 
-        // At the fourth violation the coordinator decides Resume or Disqualify.
-        // We do not auto-disqualify because accidental fullscreen exits can happen.
-        team.security.violations = Math.min(MAX_VIOLATIONS, (team.security.violations || 0) + 1);
+        // Four coordinator unlocks are allowed. If the team is resumed after
+        // the fourth recorded violation and leaves secure mode again, the
+        // next violation automatically ends the team path.
+        if (team.security.violations >= MAX_VIOLATIONS) {
+            team.security.disqualified = true;
+            team.security.locked = true;
+            team.security.lockReason = clean(req.body.reason) || "Security limit exceeded";
+            team.currentRound = "eliminated";
+            team.security.events.push({ reason: team.security.lockReason, detail: clean(req.body.detail), at: new Date() });
+            await team.save();
+            return res.status(403).json({
+                disqualified: true,
+                violations: team.security.violations,
+                maxViolations: MAX_VIOLATIONS,
+                message: "Security limit exceeded after four coordinator unlocks. Team disqualified."
+            });
+        }
+
+        team.security.violations += 1;
         team.security.locked = true;
         team.security.lockReason = clean(req.body.reason) || "Competition window lost focus";
         team.security.events.push({
@@ -594,6 +610,93 @@ router.post("/security/unlock", requireTeam, async (req, res) => {
 });
 
 // ---------------- ADMIN / ORGANIZER ----------------
+router.post("/admin/teams", requireAdmin, async (req, res) => {
+    try {
+        const teamName = clean(req.body?.teamName);
+        const members = Array.isArray(req.body?.members)
+            ? req.body.members.map(clean).filter(Boolean).slice(0, 3)
+            : [];
+
+        if (!teamName) return res.status(400).json({ message: "Team name is required" });
+
+        const existing = await CodeSprintTeam.find().sort({ teamId: 1 });
+        const nextNumber = existing.reduce((max, team) => {
+            const number = Number(String(team.teamId).match(/(\\d+)$/)?.[1] || 0);
+            return Math.max(max, number);
+        }, 0) + 1;
+
+        const teamId = `CS-${String(nextNumber).padStart(3, "0")}`;
+        const password = makeTeamPassword(teamName, teamId);
+
+        const team = await CodeSprintTeam.create({
+            teamId,
+            teamName,
+            passwordHash: hashPassword(password),
+            members
+        });
+
+        return res.status(201).json({
+            teamId: team.teamId,
+            teamName: team.teamName,
+            password,
+            members: team.members
+        });
+    } catch (error) {
+        console.error("Code Sprint create team error:", error);
+        if (error?.code === 11000) return res.status(409).json({ message: "Team already exists" });
+        return res.status(500).json({ message: "Server error" });
+    }
+});
+
+router.post("/admin/teams/bulk", requireAdmin, async (req, res) => {
+    try {
+        const rows = Array.isArray(req.body?.teams) ? req.body.teams : [];
+        if (!rows.length) return res.status(400).json({ message: "Provide at least one team" });
+
+        const existing = await CodeSprintTeam.find().sort({ teamId: 1 });
+        let nextNumber = existing.reduce((max, team) => {
+            const number = Number(String(team.teamId).match(/(\\d+)$/)?.[1] || 0);
+            return Math.max(max, number);
+        }, 0) + 1;
+
+        const created = [];
+        for (const row of rows.slice(0, 200)) {
+            const teamName = clean(row?.teamName);
+            if (!teamName) continue;
+            const members = Array.isArray(row?.members)
+                ? row.members.map(clean).filter(Boolean).slice(0, 3)
+                : [];
+            const teamId = `CS-${String(nextNumber).padStart(3, "0")}`;
+            nextNumber += 1;
+            const password = makeTeamPassword(teamName, teamId);
+            const team = await CodeSprintTeam.create({
+                teamId,
+                teamName,
+                passwordHash: hashPassword(password),
+                members
+            });
+            created.push({ teamId: team.teamId, teamName: team.teamName, password, members: team.members });
+        }
+
+        return res.status(201).json({ created });
+    } catch (error) {
+        console.error("Code Sprint bulk create error:", error);
+        return res.status(500).json({ message: "Server error" });
+    }
+});
+
+router.delete("/admin/teams/:teamId", requireAdmin, async (req, res) => {
+    try {
+        const teamId = clean(req.params.teamId).toUpperCase();
+        const team = await CodeSprintTeam.findOneAndDelete({ teamId });
+        if (!team) return res.status(404).json({ message: "Team not found" });
+        return res.json({ deleted: true, teamId });
+    } catch (error) {
+        console.error("Code Sprint delete team error:", error);
+        return res.status(500).json({ message: "Server error" });
+    }
+});
+
 router.get("/admin/teams", requireAdmin, async (req, res) => {
     try {
         const teams = await CodeSprintTeam.find().sort({ rank: 1, teamId: 1 });
