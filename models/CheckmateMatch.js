@@ -12,6 +12,10 @@ const moveSchema = new mongoose.Schema({
     color: { type: String, enum: ["white", "black"], required: true },
     capturedPiece: { type: String, default: "" },
     capturedValue: { type: Number, default: 0 },
+    notation: { type: String, default: "" },
+    from: { type: String, default: "" },
+    to: { type: String, default: "" },
+    fen: { type: String, default: "" },
     whiteMaterial: Number,
     blackMaterial: Number,
     at: { type: Date, default: Date.now }
@@ -52,6 +56,8 @@ const schema = new mongoose.Schema({
     blackCaptured: { type: captureSchema, default: () => ({}) },
 
     moves: { type: [moveSchema], default: [] },
+    fen: { type: String, default: "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1" },
+    lastMoveNotation: { type: String, default: "" },
 
     pausedByEvent: { type: Boolean, default: false },
 

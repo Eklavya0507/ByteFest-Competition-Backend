@@ -123,6 +123,16 @@ router.post("/move", requirePlayer, async (req, res) => {
         if (capturedPiece && !PIECE_VALUES[capturedPiece]) {
             return res.status(400).json({ message: "Invalid captured piece" });
         }
+        const fen = clean(req.body?.fen);
+        const notation = clean(req.body?.notation);
+        const from = clean(req.body?.from).toLowerCase();
+        const to = clean(req.body?.to).toLowerCase();
+        const boardResult = clean(req.body?.boardResult).toLowerCase();
+        const boardResultReason = clean(req.body?.boardResultReason);
+        if (fen && fen.length > 200) return res.status(400).json({ message: "Invalid board state" });
+        if (boardResult && !["white_win", "black_win", "draw"].includes(boardResult)) {
+            return res.status(400).json({ message: "Invalid board result" });
+        }
 
         commitElapsed(match);
 
@@ -159,10 +169,17 @@ router.post("/move", requirePlayer, async (req, res) => {
         if (myColor === "white") match.whiteMoves += 1;
         else match.blackMoves += 1;
 
+        if (fen) match.fen = fen;
+        if (notation) match.lastMoveNotation = notation;
+
         match.moves.push({
             color: myColor,
             capturedPiece,
             capturedValue,
+            notation,
+            from,
+            to,
+            fen,
             whiteMaterial: match.whiteMaterial,
             blackMaterial: match.blackMaterial,
             at: new Date()
@@ -172,7 +189,11 @@ router.post("/move", requirePlayer, async (req, res) => {
         match.turnStartedAt = new Date();
         await match.save();
 
-        await materialAdjudicationIfNeeded(match);
+        if (boardResult) {
+            await finalizeMatch(match, boardResult, boardResultReason || "Digital chess board result");
+        } else {
+            await materialAdjudicationIfNeeded(match);
+        }
         const fresh = await CheckmateMatch.findById(match._id);
 
         return res.json({

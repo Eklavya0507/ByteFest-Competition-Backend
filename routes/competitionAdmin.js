@@ -204,6 +204,9 @@ router.patch("/team/:event/:registrationId/security", requireAdmin, async (req, 
         if (action === "unlock") {
             team.security.locked = false;
             team.security.lockReason = "";
+        } else if (action === "lock") {
+            team.security.locked = true;
+            team.security.lockReason = "Locked by admin";
         } else if (action === "disqualify") {
             team.security.disqualified = true;
             team.security.locked = true;
@@ -213,7 +216,7 @@ router.patch("/team/:event/:registrationId/security", requireAdmin, async (req, 
             team.security.locked = false;
             team.security.lockReason = "";
         } else {
-            return res.status(400).json({ message: "Use unlock, disqualify or resume" });
+            return res.status(400).json({ message: "Use lock, unlock, disqualify or resume" });
         }
 
         await team.save();

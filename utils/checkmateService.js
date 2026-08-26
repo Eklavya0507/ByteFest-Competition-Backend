@@ -188,6 +188,8 @@ function publicMatch(match, whitePlayer = null, blackPlayer = null) {
         blackMaterial: match.blackMaterial,
         whiteTournamentPoints: Number(whitePlayer?.tournamentPoints || 0),
         blackTournamentPoints: Number(blackPlayer?.tournamentPoints || 0),
+        fen: match.fen || "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        lastMoveNotation: match.lastMoveNotation || "",
         result: match.result,
         resultReason: match.resultReason,
         winnerRegistrationId: match.winnerRegistrationId
