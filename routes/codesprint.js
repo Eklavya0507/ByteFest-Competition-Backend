@@ -59,6 +59,7 @@ function stagePublic(question, stageProgress) {
         speedMeasured: Boolean(question.speedMeasured),
         prompt: question.prompt,
         placeholder: question.placeholder || "Enter answer",
+        ui: question.ui || null,
         hints: (question.hints || []).map((hint, index) => ({
             number: index + 1,
             penalty: hint.penalty,
