@@ -9,6 +9,7 @@ const BugHuntControl = require("../models/BugHuntControl");
 const CheckmatePlayer = require("../models/CheckmatePlayer");
 const CheckmateMatch = require("../models/CheckmateMatch");
 const EventControl = require("../models/EventControl");
+const { standardWorkbook, checkmateWorkbook } = require("../utils/reportWorkbook");
 
 const checkmateAuth = require("../utils/checkmateAuth");
 const bugRoutes = require("./bughunt");
@@ -676,6 +677,101 @@ router.get("/rankings", requireAdmin, async (req, res) => {
         })));
     } catch (error) {
         res.status(500).json({ message: "Server error" });
+    }
+});
+
+
+/* ---------------- Individual team restart ---------------- */
+router.post("/team/:event/:registrationId/restart", requireAdmin, async (req, res) => {
+    try {
+        const event = decodeURIComponent(req.params.event);
+        const id = clean(req.params.registrationId).toUpperCase();
+        const Model = event === "Code Sprint" ? CodeSprintTeam : event === "Bug Hunt" ? BugHuntTeam : null;
+        if (!Model) return res.status(400).json({ message: "Restart is available for Code Sprint and Bug Hunt" });
+
+        const team = await Model.findOne({ registrationId: id });
+        if (!team) return res.status(404).json({ message: "Competition record not found. The team may not have logged in yet." });
+
+        team.progress = {};
+        team.currentStage = 1;
+        team.totalHintsUsed = 0;
+        team.rank = null;
+        team.security.violations = 0;
+        team.security.locked = false;
+        team.security.lockReason = "";
+        team.security.disqualified = false;
+        team.security.events = [];
+
+        if (event === "Code Sprint") {
+            team.currentRound = "round1";
+            team.totalScore = 0;
+            team.correctStages = 0;
+            team.knockout = {
+                semifinalWinner: null,
+                bestSemifinalLoser: false,
+                wildcardEntryWinner: null,
+                entryFinalWinner: null,
+                wildcardFinalWinner: null,
+                finalPlace: null
+            };
+        } else {
+            const bugControl = await bugRoutes.getControl();
+            const bugPhase = bugRoutes.phaseFrom(bugControl);
+            if (!["waiting_start", "round1"].includes(bugPhase.key)) {
+                return res.status(409).json({
+                    message: "Bug Hunt uses one synchronized official timeline. Full restart is allowed before start or during Round 1 only; later use coordinator unlock or restart the whole Bug Hunt event."
+                });
+            }
+            team.currentRound = bugPhase.key;
+            team.qualificationScore = 0;
+            team.finalScore = 0;
+            team.wrongSubmissions = 0;
+            team.finalPlace = null;
+        }
+
+        team.markModified("progress");
+        team.markModified("security");
+        if (event === "Code Sprint") team.markModified("knockout");
+        await team.save();
+
+        res.json({
+            message: `${event} restarted for ${id}. Scores, hints, attempts, rank and security progress were cleared.`,
+            registrationId: id,
+            currentRound: team.currentRound
+        });
+    } catch (error) {
+        console.error("Competition restart error:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+/* ---------------- Polished Excel teacher report ---------------- */
+router.get("/report/:event.xlsx", requireAdmin, async (req, res) => {
+    try {
+        const event = normalizeEvent(decodeURIComponent(req.params.event));
+        if (!event) return res.status(400).json({ message: "Unsupported event" });
+
+        let workbook;
+        if (event === "Checkmate") {
+            const players = await checkmateRows();
+            const matches = await CheckmateMatch.find({}).sort({ createdAt: 1 }).lean();
+            workbook = await checkmateWorkbook({ players, matches });
+        } else {
+            const registrations = await listApprovedRegistrations(event);
+            const Model = event === "Code Sprint" ? CodeSprintTeam : BugHuntTeam;
+            const approvedIds = registrations.map(item => clean(item.registrationId).toUpperCase()).filter(Boolean);
+            const teams = await Model.find({ registrationId: { $in: approvedIds } }).lean();
+            workbook = await standardWorkbook({ event, registrations, teams });
+        }
+
+        const filename = `BYTEFEST_2026_${event.replace(/\s+/g, "_")}_Official_Report.xlsx`;
+        res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
+        await workbook.xlsx.write(res);
+        res.end();
+    } catch (error) {
+        console.error("Excel report error:", error);
+        res.status(500).json({ message: "Could not create Excel report" });
     }
 });
 

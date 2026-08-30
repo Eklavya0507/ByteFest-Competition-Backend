@@ -1,5 +1,5 @@
 /*
- * BYTEFEST 2026 - CODE SPRINT FINAL SELECTED QUESTION BANK (v8)
+ * BYTEFEST 2026 - CODE SPRINT FINAL SELECTED QUESTION BANK (v9 LOGICAL/VISUAL)
  * Correct answers stay server-side in this file.
  * Frontend receives only prompt/ui/hints through stagePublic().
  */
@@ -17,7 +17,17 @@ module.exports = {
         type: "matrix-pattern",
         maxPoints: 30,
         speedMeasured: true,
-        prompt: `The wall shows four rows:\n\n2   3   -> 11\n4   5   -> 29\n6   7   -> 55\n8   9   -> ?\n\nEvery row uses the SAME rule.\n\n1) Find the missing value N.\n2) Write N in binary.\n3) Let P = number of 1-bits in N.\n4) Final key = N XOR (P << 4).\n\nEnter the final key.`,
+        prompt: `A security wall has learned one hidden rule from these completed terminals:
+
+2,3 -> 11     4,5 -> 29     6,7 -> 55
+
+The last terminal shows 8,9 -> ?. Call that missing value N.
+
+The lock then reads N as binary. Let P be the number of 1-bits in that binary signature.
+
+ACCESS KEY = N XOR (P << 4)
+
+What key opens the wall?`,
         placeholder: "Final key",
         answers: ["25"],
         organizerAnswer: "25",
@@ -34,7 +44,17 @@ module.exports = {
         type: "priority-maze",
         maxPoints: 30,
         speedMeasured: true,
-        prompt: `START n = 14. Perform exactly 10 operations.\n\nCheck rules TOP-TO-BOTTOM and apply ONLY the first rule that matches:\n\n1. if n % 5 == 0: n = n/5 + 7\n2. else if n is even: n = n/2 + 4\n3. else: n = 2n - 3\n\nA = value after operation 3\nB = value after operation 6\nC = value after operation 10\n\nFinal key = (A + reverse(B)) XOR C.`,
+        prompt: `A maze controller begins with n = 14. On every tick it scans these rules from TOP to BOTTOM and applies only the first rule that matches:
+
+- divisible by 5  -> n/5 + 7
+- otherwise even -> n/2 + 4
+- otherwise      -> 2n - 3
+
+After 10 ticks, three hidden sensors remember the values at tick 3 (A), tick 6 (B), and tick 10 (C).
+
+The exit lock reads: (A + reverse(B)) XOR C
+
+Find the exit code.`,
         placeholder: "Final maze key",
         answers: ["109"],
         organizerAnswer: "109",
@@ -52,7 +72,11 @@ module.exports = {
         type: "memory-lock",
         maxPoints: 40,
         speedMeasured: true,
-        prompt: `Previous stages are LOCKED.\n\nLet:\nA = your Stage 1 final key\nB = your Stage 2 final key\n\n1) R = reverse(A)\n2) S = digitSum(B)\n3) T = R XOR B\n4) Final key = ((T << 1) + S) mod 100\n\nEnter the final key.\n\nImportant: the website does NOT show A or B again.`,
+        prompt: `The previous two rooms are now sealed; their answers are no longer visible.
+
+Let A be the key you used in Stage 1 and B the key from Stage 2. The memory lock mirrors A, counts the digits of B, XORs the mirrored A with B, then doubles that result and adds the digit count. Only the last two digits matter.
+
+What code does the lock accept?`,
         placeholder: "Memory key",
         answers: ["88"],
         organizerAnswer: "88",
@@ -76,7 +100,15 @@ module.exports = {
         type: "pixel-binary",
         maxPoints: 30,
         speedMeasured: true,
-        prompt: `Four pixel rows are shown:\n\n1 0 1 0\n0 1 1 1\n1 1 0 0\n0 1 0 1\n\nTreat each row as a 4-bit binary number.\n\n1) Convert all four rows to decimal values.\n2) Sort the four values.\n3) Final = (largest - smallest) * (second-largest + second-smallest)\n4) Enter Final mod 100.`,
+        prompt: `Four diagnostic strips are blinking as 4-bit values:
+
+1010     0111     1100     0101
+
+The controller converts the strips to decimal and arranges them from low to high. Its checksum is:
+
+(largest - smallest) x (two middle values added together)
+
+Only the last two decimal digits are accepted. What is the checksum?`,
         placeholder: "Pixel checksum",
         answers: ["19"],
         organizerAnswer: "19",
@@ -93,7 +125,16 @@ module.exports = {
         type: "stack-queue-simulation",
         maxPoints: 30,
         speedMeasured: true,
-        prompt: `Initial state:\n\nSTACK bottom [6, 2, 9] top\nQUEUE front [4, 7, 3] rear\n\nExecute in order:\n\n1) a = POP()\n2) b = DEQUEUE()\n3) PUSH(a - b)\n4) ENQUEUE(a + b)\n5) c = POP()\n6) d = DEQUEUE()\n\nFinal key = (c * d) + current TOP(stack) + current FRONT(queue).`,
+        prompt: `The machine starts with:
+STACK bottom [6,2,9] top
+QUEUE front [4,7,3] rear
+
+Its recovery script fires this chain without pausing:
+a=POP -> b=DEQUEUE -> PUSH(a-b) -> ENQUEUE(a+b) -> c=POP -> d=DEQUEUE
+
+The unlock sensor reads (c x d) + the CURRENT stack top + the CURRENT queue front.
+
+What value does it see?`,
         placeholder: "Machine key",
         answers: ["40"],
         organizerAnswer: "40",
@@ -111,13 +152,22 @@ module.exports = {
         type: "logic-gate-network",
         maxPoints: 40,
         speedMeasured: true,
-        prompt: `Inputs: A=1, B=1, C=0, D=1, E=0\n\nX = NAND(A,B)\nY = C XOR D\nZ = NOR(B,E)\nP = X OR Y\nQ = XNOR(D,E)\nR = P AND (NOT Z)\n\nTake bits in order Q-R-Y-X.\nRotate the 4-bit value RIGHT by 1.\nConvert the rotated value to decimal M.\n\nFinal key = M * 17 + 8.`,
+        prompt: `A damaged power grid exposes five live inputs: A=1, B=1, C=0, D=1, E=0.
+
+Rebuild the circuit using these gate labels:
+X=NAND(A,B), Y=C XOR D, Z=NOR(B,E), P=X OR Y, Q=XNOR(D,E), R=P AND NOT Z.
+
+When the circuit is stable, the controller reads Q-R-Y-X as a 4-bit word, rotates it one place to the RIGHT, converts it to decimal M, then applies:
+
+POWER KEY = M x 17 + 8
+
+Find the key.`,
         placeholder: "Power key",
         answers: ["59"],
         organizerAnswer: "59",
         hints: [hint("X=0, Y=1, Z=0.")],
         ui: {
-          kind: "gates",
+          kind: "gates-connect",
           inputs: ["A=1","B=1","C=0","D=1","E=0"],
           gates: ["X=NAND(A,B)","Y=C XOR D","Z=NOR(B,E)","P=X OR Y","Q=XNOR(D,E)","R=P AND NOT Z"],
           outputOrder: "Q - R - Y - X"
@@ -136,7 +186,19 @@ module.exports = {
         type: "robot-pattern-vault",
         maxPoints: 100,
         speedMeasured: true,
-        prompt: `GRID:\nS . . # .\n# # . # .\n. . . . .\n. # # . #\n. . . . E\n\nStart facing EAST. Use the UNIQUE SHORTEST path to E.\n\nToken A = total number of F/L/R commands.\nAlso record F-count.\n\nPATTERN:\n(2,4)->10\n(3,5)->18\n(4,7)->32\n(6,9)->?\n\nToken B = pattern result XOR 21.\n\nFinal vault = (Token A * 5) + (Token B XOR F-count).`,
+        prompt: `A recovery robot starts at S facing EAST. Walls are # and the only exit is E:
+
+S..#.
+##.#.
+.....
+.##.#
+....E
+
+Use the unique shortest route. Token A is the total number of F/L/R commands; also remember how many of those commands are F.
+
+A second panel shows: (2,4)->10, (3,5)->18, (4,7)->32, (6,9)->?. Its missing value XOR 21 becomes Token B.
+
+MASTER VAULT = (Token A x 5) + (Token B XOR F-count).`,
         placeholder: "Master vault key",
         answers: ["93"],
         organizerAnswer: "93",
@@ -162,7 +224,13 @@ module.exports = {
         type: "condition-filter",
         maxPoints: 100,
         speedMeasured: true,
-        prompt: `Input values:\n[5, 8, 12, 15, 21, 24]\n\nFor each x, test:\nA) divisible by 3\nB) even\nC) x > 10\n\nKEEP x only if EXACTLY TWO conditions are true.\n\nFor each kept x:\ntransform(x) = x^2 + 3x\n\nR = sum of transformed values\nToken = R mod 31\n\nThe panel shows 4 active switches.\n\nFinal key = Token * 4 + digitSum(R).`,
+        prompt: `Six data packets arrive: [5,8,12,15,21,24].
+
+A packet survives only when EXACTLY TWO of these lights turn on: divisible by 3, even, greater than 10. Every survivor is transformed by x^2 + 3x and the transformed values are summed into R.
+
+Token = R mod 31. The control panel has 4 active switches.
+
+CONTROL KEY = Token x 4 + digitSum(R).`,
         placeholder: "Control key",
         answers: ["138"],
         organizerAnswer: "138",
@@ -187,7 +255,14 @@ module.exports = {
         type: "network-route",
         maxPoints: 100,
         speedMeasured: true,
-        prompt: `Edges (latency):\nS-A=4, S-B=5, S-C=3\nA-D=4, A-F=7\nB-D=2, B-F=4\nC-D=6, C-F=5\nD-T=5, F-T=3\n\nD is BLOCKED.\nSecure nodes are A and C.\n\nA valid route must:\n- pass through EXACTLY ONE secure node\n- have EVEN total latency\n\nChoose the minimum-latency valid route.\n\nchecksum = alphabet positions of non-S route nodes\nFinal key = (latency << 3) XOR checksum.`,
+        prompt: `A network must reach T from S. D is blocked. A and C are secure nodes.
+
+Latencies: S-A4, S-B5, S-C3, A-D4, A-F7, B-D2, B-F4, C-D6, C-F5, D-T5, F-T3.
+
+A route is valid only if it touches EXACTLY ONE secure node and its total latency is EVEN. Among valid routes, choose the fastest.
+
+Checksum = alphabet positions of every non-S node on that route.
+NETWORK KEY = (latency << 3) XOR checksum.`,
         placeholder: "Network key",
         answers: ["107"],
         organizerAnswer: "107",
@@ -212,7 +287,15 @@ module.exports = {
         type: "matrix-rotation",
         maxPoints: 100,
         speedMeasured: true,
-        prompt: `Matrix:\n\n2  7  4\n9  5  1\n6  3  8\n\n1) Rotate the matrix 90 degrees CLOCKWISE.\n2) Read the MAIN diagonal of the rotated matrix as a 3-digit number N.\n3) Final key = (N XOR 63) mod 100.`,
+        prompt: `The lock shows this matrix:
+
+2  7  4
+9  5  1
+6  3  8
+
+The display is physically rotated 90 degrees CLOCKWISE. Read the main diagonal after rotation as one 3-digit number N.
+
+MATRIX KEY = (N XOR 63) mod 100.`,
         placeholder: "Matrix key",
         answers: ["89"],
         organizerAnswer: "89",
@@ -236,7 +319,12 @@ module.exports = {
         type: "barcode-binary",
         maxPoints: 100,
         speedMeasured: true,
-        prompt: `Five barcode rows:\n\n0101\n1001\n0011\n1110\n0110\n\nConvert each 4-bit row to decimal: V1..V5.\n\nP = sum values at PRIME positions 2,3,5\nN = sum values at NON-PRIME positions 1,4\nDelta = |P - N|\nS = sum all values\n\nFinal key = ((S XOR (Delta << 4)) * 5 + P) mod 100.`,
+        prompt: `Five binary barcode strips scan as:
+0101   1001   0011   1110   0110
+
+Convert them to decimal values V1..V5. Let P be the sum at prime positions 2,3,5 and N the sum at non-prime positions 1,4. Let Delta=|P-N| and S be the sum of all five values.
+
+BARCODE KEY = ((S XOR (Delta << 4)) x 5 + P) mod 100.`,
         placeholder: "Barcode key",
         answers: ["83"],
         organizerAnswer: "83",
@@ -260,7 +348,11 @@ module.exports = {
         type: "sensor-filter",
         maxPoints: 25,
         speedMeasured: true,
-        prompt: `A: 101011 (binary), ACTIVE\nB: 31 (hex), ACTIVE\nC: 100 (octal), ACTIVE\nD: 53 (decimal), STANDBY\nE: 111111 (binary), ACTIVE\n\nToken1 = sum ACTIVE values satisfying EXACTLY ONE:\n- value is PRIME\n- value is a PERFECT SQUARE\n\nEnter Token1.`,
+        prompt: `Five sensors report: A=101011(binary) ACTIVE, B=31(hex) ACTIVE, C=100(octal) ACTIVE, D=53(decimal) STANDBY, E=111111(binary) ACTIVE.
+
+The vault accepts only ACTIVE sensors satisfying EXACTLY ONE property: PRIME or PERFECT SQUARE. Add every accepted sensor value.
+
+That sum is Token1.`,
         placeholder: "Token 1",
         answers: ["156"],
         organizerAnswer: "156",
@@ -276,7 +368,13 @@ module.exports = {
         type: "recurrence",
         maxPoints: 25,
         speedMeasured: true,
-        prompt: `Use your Token1 from Phase 1.\n\nn = Token1 mod 100\nRepeat exactly 4 times:\n\nif n % 4 == 0: n = n/4 + 19\nelse if n is even: n = n/2 + 9\nelse: n = (2n + 5) mod 100\n\nToken2 = final n.\n\nEnter Token2.`,
+        prompt: `The second vault inherits Token1 but immediately keeps only Token1 mod 100 as n. Four controller cycles follow. On each cycle the first matching rule wins:
+
+- n divisible by 4 -> n/4 + 19
+- otherwise n even -> n/2 + 9
+- otherwise -> (2n + 5) mod 100
+
+After the fourth cycle, the displayed n is Token2.`,
         placeholder: "Token 2",
         answers: ["99"],
         organizerAnswer: "99",
@@ -293,13 +391,18 @@ module.exports = {
         type: "bit-network",
         maxPoints: 25,
         speedMeasured: true,
-        prompt: `Use Token2 = 99 and write it as 8-bit:\np q r s t u v w\n\nA = p XOR r\nB = q AND v\nC = NOT(s OR t)\nD = u XOR w\n\nRead bits in order B-D-A-C to form binary M.\n\nToken3 = M * 9 + digitProduct(Token2)\n\nEnter Token3.`,
+        prompt: `Token2 is 99. The bit console expands it to 8 bits p q r s t u v w. Build the small circuit:
+A=p XOR r, B=q AND v, C=NOT(s OR t), D=u XOR w.
+
+The console reads the outputs in the unusual order B-D-A-C to form binary M.
+
+Token3 = M x 9 + digitProduct(Token2).`,
         placeholder: "Token 3",
         answers: ["216"],
         organizerAnswer: "216",
         hints: [hint("99 in 8-bit binary is 01100011.")],
         ui: {
-          kind: "gates",
+          kind: "gates-connect",
           inputs: ["Token2 = 99", "8-bit = 01100011"],
           gates: ["A=p XOR r","B=q AND v","C=NOT(s OR t)","D=u XOR w"],
           outputOrder: "B - D - A - C"
@@ -311,7 +414,11 @@ module.exports = {
         type: "memory-vault",
         maxPoints: 25,
         speedMeasured: true,
-        prompt: `Use your stored tokens:\nToken1 = 156\nToken2 = 99\nToken3 = 216\n\nX = (Token1 mod 256) XOR Token2 XOR (Token3 mod 256)\n\nFinal code = X + reverse(last two digits of Token1)\n\nEnter the final code.`,
+        prompt: `The final vault remembers Token1=156, Token2=99 and Token3=216.
+
+Its hidden register computes X=(Token1 mod 256) XOR Token2 XOR (Token3 mod 256). The door then adds the reverse of the last two digits of Token1.
+
+What final code appears?`,
         placeholder: "Grand Final code",
         answers: ["104"],
         organizerAnswer: "104",

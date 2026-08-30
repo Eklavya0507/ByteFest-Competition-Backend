@@ -1,6 +1,6 @@
 {
   "name": "bytefest-competition-backend",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "description": "BYTEFEST 2026 Code Sprint + Bug Hunt + Checkmate competition backend",
   "private": true,
   "main": "server.js",
@@ -17,7 +17,8 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "mongoose": "^9.9.2"
+    "mongoose": "^9.9.2",
+    "exceljs": "^4.4.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

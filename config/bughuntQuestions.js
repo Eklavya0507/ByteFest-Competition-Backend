@@ -1,5 +1,5 @@
 /*
- * BYTEFEST 2026 - BUG HUNT FINAL SELECTED QUESTION BANK (v8)
+ * BYTEFEST 2026 - BUG HUNT FINAL SELECTED QUESTION BANK (v9 LOGICAL/MOBILE)
  * Mixed code + flowchart + state + logs + hidden-requirement questions.
  */
 const HINTS=[10,20,30];
@@ -15,28 +15,59 @@ module.exports={
  round1:{title:"Round 1 - Bug Radar",durationSeconds:35*60,stages:[
   {
    id:"bh-r1-q1-negative-max",title:"Q1 - Negative Maximum",type:"faulty-line",maxPoints:20,
-   prompt:`The function should return the largest element.\n\nint findMax(int a[], int n) {\n    int max = 0;\n    for (int i = 0; i < n; i++) {\n        if (a[i] > max)\n            max = a[i];\n    }\n    return max;\n}\n\nTest: [-8,-3,-11,-2]\nExpected: -2\nActual: 0\n\nSelect/type the faulty line or expression.`,
+   prompt:`A scoreboard service works for ordinary scores, but a judge reports this failure:
+
+Input scores: [-8,-3,-11,-2]
+Expected winner score: -2
+Service returns: 0
+
+Code:
+int findMax(int a[], int n) {
+    int max = 0;
+    for (int i=0; i<n; i++)
+        if (a[i] > max) max = a[i];
+    return max;
+}
+
+Which line/idea creates a value that was never in the contest, and why?`,
    placeholder:"Example: line 2 or max=0",answers:["line 2","2","max=0","int max = 0"],
    hints:hints("Look at a value that never appears in the input.","Ask whether max=0 is safe for every possible array.","Initialize from a[0] or a safe lower value."),
    ui:{kind:"code-lines",code:["int findMax(int a[], int n) {","  int max = 0;","  for (int i=0; i<n; i++) {","    if (a[i] > max)","      max = a[i];","  }","  return max;","}"],choices:["Line 2","Line 3","Line 4","Line 5"]}
   },
   {
    id:"bh-r1-q2-test-expectation",title:"Q2 - Bug or No Bug",type:"bug-or-no-bug",maxPoints:20,
-   prompt:`Function:\n\ndef average(a, b):\n    return (a + b) / 2\n\nTest: a=5, b=8\nProgram output: 6.5\nExpected in test file: 6\n\nChoose:\nA) Code bug\nB) Test expectation bug\nC) No bug anywhere`,
+   prompt:`A QA report flags this function as broken:
+
+def average(a,b):
+    return (a+b)/2
+
+For a=5 and b=8 the program returns 6.5, but the test file expects 6.
+
+The specification only says “ordinary arithmetic mean.”
+
+Where is the bug: code, test expectation, or nowhere?`,
    placeholder:"A, B or C",answers:["b","test expectation bug","test bug"],
    hints:hints("Calculate the arithmetic mean manually.","Check whether integer truncation was required.","The test expectation can be wrong too."),
    ui:{kind:"choices",choices:["A - Code bug","B - Test expectation bug","C - No bug"]}
   },
   {
    id:"bh-r1-q3-flowchart-even",title:"Q3 - Flowchart Fault",type:"flowchart-fault",maxPoints:20,
-   prompt:`Requirement:\nPrint EVEN for even n and ODD for odd n.\n\nDecision: n % 2 == 0 ?\nCurrent arrows:\nYES -> PRINT ODD\nNO  -> PRINT EVEN\n\nTest n=8:\nExpected EVEN\nFlowchart prints ODD.\n\nWhat exactly must be fixed?`,
+   prompt:`A sensor flowchart should label every integer EVEN or ODD. The decision diamond asks “n % 2 == 0 ?” but the YES wire reaches PRINT ODD and the NO wire reaches PRINT EVEN.
+
+With n=8 the decision is TRUE and the wrong label appears.
+
+Do you change the condition, the outputs, or the wires?`,
    placeholder:"Example: swap branches",answers:["swap branches","swap outputs","yes even no odd","yes->even no->odd"],
    hints:hints("The decision expression is correct.","For n=8 the decision is TRUE.","YES must lead to EVEN."),
    ui:{kind:"flowchart",nodes:["READ n","n % 2 == 0 ?","YES -> PRINT ODD","NO -> PRINT EVEN"],choices:["Swap output branches","Change condition to n%2==1","No bug"]}
   },
   {
    id:"bh-r1-q4-off-by-one",title:"Q4 - Boundary Trap",type:"faulty-line",maxPoints:20,
-   prompt:`int sumArray(int a[], int n) {\n    int total = 0;\n    for (int i = 0; i <= n; i++) {\n        total += a[i];\n    }\n    return total;\n}\n\nInput a=[4,6,2], n=3\nExpected sum=12\n\nGive the minimum fix to the loop condition.`,
+   prompt:`A three-sample packet [4,6,2] is passed to sumArray with n=3. The expected sum is 12, but the program sometimes reads garbage after the last sample:
+
+for (int i=0; i<=n; i++) total += a[i];
+
+Find the smallest boundary fix that guarantees the loop touches only real samples.`,
    placeholder:"Correct loop condition",answers:["i < n","i<n","for(int i=0;i<n;i++)"],
    hints:hints("Valid indices are 0,1,2.","What happens when i becomes 3?","The fix changes <= to <."),
    ui:{kind:"code-lines",code:["int total = 0;","for (int i = 0; i <= n; i++) {","  total += a[i];","}"],choices:["i < n","i <= n-1","i < n-1"]}
@@ -45,7 +76,12 @@ module.exports={
  round2:{title:"Round 2 - Patch It",durationSeconds:40*60,stages:[
   {
    id:"bh-r2-q1-binary-search",title:"Q1 - Binary Search Stuck",type:"minimal-patch",maxPoints:25,
-   prompt:`while (low <= high) {\n    mid = (low + high) / 2;\n    if (a[mid] == key) return mid;\n    if (a[mid] < key)\n        low = mid;\n    else\n        high = mid;\n}\n\nVisible tests show key=7 and key=2 can hang.\n\nEnter both corrected assignments separated by a comma.`,
+   prompt:`A search tracker occasionally freezes even though low and high are still valid. The trace shows the same mid appearing again and again.
+
+if (a[mid] < key) low = mid;
+else high = mid;
+
+You may change only these two assignments. What patch guarantees that each failed comparison removes mid from the next search interval?`,
    placeholder:"low=... , high=...",answers:[],
    validate:(a)=>includesAll(a,["low=mid+1","high=mid-1"]),
    hints:hints("The search interval sometimes does not shrink.","If mid is wrong, exclude it from the next interval.","Move one position beyond mid."),
@@ -53,7 +89,14 @@ module.exports={
   },
   {
    id:"bh-r2-q2-prime-hidden-input",title:"Q2 - Test Case Detective",type:"test-case-detective",maxPoints:25,
-   prompt:`def is_prime(n):\n    for i in range(2, n):\n        if n % i == 0:\n            return False\n    return True\n\nRequirement: Every n < 2 is NOT prime.\n\nWhich input exposes the bug?\n2, 7, 9, 1\n\nThen enter: input | minimum patch`,
+   prompt:`A prime checker passes tests for 2, 7 and 9. The specification quietly adds one rule: every n<2 is NOT prime.
+
+def is_prime(n):
+    for i in range(2,n):
+        if n%i==0: return False
+    return True
+
+Among 2,7,9,1 choose the value that exposes the hidden failure, then add the smallest guard that fixes the entire n<2 family.`,
    placeholder:"Example: 1 | if n < 2: return False",answers:[],
    validate:(a)=>{const s=compact(a);return s.includes("1")&&s.includes("n<2")&&s.includes("returnfalse")},
    hints:hints("Try a value where the loop does not execute.","9 is correctly rejected by divisor 3.","The requirement explicitly mentions n<2."),
@@ -61,14 +104,23 @@ module.exports={
   },
   {
    id:"bh-r2-q3-lock-threshold",title:"Q3 - State Machine Patch",type:"state-table-patch",maxPoints:25,
-   prompt:`Requirement: Lock an account immediately after 3 consecutive failed login attempts.\n\nCurrent logic:\nfailed = failed + 1\nif failed > 3:\n    state = LOCKED\n\nObserved:\nFailure 1 -> ACTIVE\nFailure 2 -> ACTIVE\nFailure 3 -> ACTIVE\nFailure 4 -> LOCKED\n\nGive the minimum condition fix.`,
+   prompt:`A login system promises: “the third consecutive failure locks the account immediately.” The audit trail says ACTIVE after failures 1, 2 and 3, then LOCKED after failure 4.
+
+Current rule: after incrementing failed, lock only when failed > 3.
+
+What single comparison change makes the audit match the promise?`,
    placeholder:"Correct condition",answers:["failed >= 3","failed>=3","if failed >= 3","if failed>=3"],
    hints:hints("The lock happens one failure too late.","Look at the exact boundary value 3.","The update is correct; the comparison is not."),
    ui:{kind:"state-table",rows:[["1","ACTIVE"],["2","ACTIVE"],["3","ACTIVE (wrong)"],["4","LOCKED"]],choices:["failed >= 3","failed == 4","failed > 2"]}
   },
   {
    id:"bh-r2-q4-even-median",title:"Q4 - Median Index Patch",type:"minimal-patch",maxPoints:25,
-   prompt:`Array is sorted.\n\nmid = n / 2\n\nif n % 2 == 0:\n    return (a[mid] + a[mid + 1]) / 2.0\n\nTest: [2,4,8,10], n=4\nExpected median=6\nActual=9\n\nPatch only the return expression.`,
+   prompt:`A statistics service already sorts its data. For [2,4,8,10] it reports median 9 instead of 6.
+
+mid=n/2
+return (a[mid] + a[mid+1]) / 2.0
+
+The formula for averaging two values is fine. Which two zero-based indices should be used when n is even?`,
    placeholder:"Correct return expression",answers:[],
    validate:(a)=>{const s=compact(a);return s.includes("a[mid-1]")&&s.includes("a[mid]")&&s.includes("2.0")},
    hints:hints("For four values the middle pair is 4 and 8.","mid is 2 when n=4.","The middle indices are 1 and 2."),
@@ -78,7 +130,9 @@ module.exports={
  round3:{title:"Round 3 - Hidden Failure",durationSeconds:50*60,stages:[
   {
    id:"bh-r3-q1-username-normalize",title:"Q1 - Hidden Requirement",type:"hidden-requirement",maxPoints:30,
-   prompt:`Requirement: A username is a duplicate after trimming outer spaces and ignoring letter case.\n\nExisting users:\nAlice\ndebugger\nBYTEKING\n\nNew registration: "  alice  "\nCurrent system: AVAILABLE\nExpected: DUPLICATE\n\nWhat normalization is missing?`,
+   prompt:`A duplicate-name guard is bypassed by the new registration "  alice  " even though “Alice” already exists. The written rule says outer spaces do not matter and letter case does not matter.
+
+What normalization must happen before the duplicate comparison?`,
    placeholder:"Describe the normalization",answers:[],
    validate:(a)=>{const s=compact(a);return (s.includes("trim")||s.includes("strip"))&&(s.includes("lower")||s.includes("case"))},
    hints:hints("Remove outside spaces first.","Alice and alice should be equivalent.","Normalize both stored and incoming usernames."),
@@ -86,7 +140,9 @@ module.exports={
   },
   {
    id:"bh-r3-q2-zero-history-log",title:"Q2 - Log Investigation",type:"log-investigation",maxPoints:30,
-   prompt:`SERVER LOG\n\n[10:12:04] GET /history/42 -> records=3\n[10:12:05] avg = total / count -> 71.3\n\n[10:15:22] GET /history/91 -> records=0\n[10:15:23] ERROR: division by zero\n\nMost users work. Only users with no history fail.\n\nIdentify the root cause.`,
+   prompt:`Two users reach the same history endpoint. One has 3 records and gets avg=71.3. The other has 0 records and immediately triggers “division by zero.”
+
+Nothing else fails in the request. From the log alone, identify the broken assumption and the safe guard point.`,
    placeholder:"Root cause",answers:["count=0","count = 0","division by zero","records=0","empty history"],
    hints:hints("The failure happens immediately after records=0.","The profile request succeeds.","Any division needs a non-zero denominator."),
    ui:{kind:"logs",lines:["records=3 -> avg 71.3","records=0 -> ERROR division by zero"],choices:["count=0","bad token","timeout","null id"]}
@@ -101,7 +157,9 @@ module.exports={
   },
   {
    id:"bh-r3-q4-palindrome-normalize",title:"Q4 - Hidden Text Case",type:"hidden-test",maxPoints:30,
-   prompt:`def palindrome(s):\n    return s == s[::-1]\n\nRequirement: Ignore spaces and letter case.\n\nVisible tests:\n"level" -> PASS\n"radar" -> PASS\n"hello" -> PASS\n\nHidden case: "Never odd or even"\n\nWhat must happen before the reverse comparison?`,
+   prompt:`The palindrome core passes “level”, “radar” and correctly rejects “hello”, yet a hidden sentence “Never odd or even” fails even though the requirement says spaces and case must be ignored.
+
+What preprocessing must happen before the existing reverse comparison?`,
    placeholder:"Normalization step",answers:[],
    validate:(a)=>{const s=compact(a);return (s.includes("lower")||s.includes("case"))&&(s.includes("space")||s.includes("replace")||s.includes("remove"))},
    hints:hints("The reverse comparison itself is fine.","Look at spaces and uppercase letters.","Normalize the string first."),
@@ -111,7 +169,13 @@ module.exports={
  surprise:{title:"Surprise Bug Drop",durationSeconds:20*60,stages:[
   {
    id:"bh-surprise-int-overflow",title:"Extreme Value Incident",type:"incident-diagnosis",maxPoints:50,
-   prompt:`Operation:\n2147483647 + 1\n\nExpected: 2147483648\nActual: -2147483648\n\n99 ordinary tests passed.\n\nChoose the most likely failure:\n- overflow\n- off-by-one\n- null value\n- loop bug`,
+   prompt:`A production counter passes 99 tests, then this incident appears:
+
+2147483647 + 1
+Expected: 2147483648
+Actual: -2147483648
+
+Nothing loops and no input is null. Name the failure class and the safe general mitigation.`,
    placeholder:"Root cause",answers:["overflow","integer overflow","32-bit overflow","32 bit overflow"],
    hints:hints("2147483647 is a familiar boundary.","The result wraps to the most negative 32-bit value.","Think about integer range."),
    ui:{kind:"choices",choices:["overflow","off-by-one","null value","loop bug"],note:"Mitigation: wider or checked arithmetic."}
