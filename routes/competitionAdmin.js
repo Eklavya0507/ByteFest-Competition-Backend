@@ -40,6 +40,13 @@ function normalizeEvent(value) {
     return EVENTS.includes(event) ? event : "";
 }
 
+function nextIncompleteBugStage(team, roundKey) {
+    const stages = team?.progress?.[roundKey]?.stages || {};
+    let stage = 1;
+    while (stages[`stage${stage}`]?.completedAt) stage += 1;
+    return stage;
+}
+
 async function getEventControl(event) {
     return EventControl.findOneAndUpdate(
         { event },
@@ -213,6 +220,39 @@ router.patch("/team/:event/:registrationId/security", requireAdmin, async (req, 
             team.security.locked = true;
             team.currentRound = "eliminated";
         } else if (action === "resume") {
+            /*
+              ONE MORE CHANCE for a disqualified Bug Hunt team.
+              DQ changes currentRound to "eliminated", so simply clearing the
+              disqualified flag is not enough. Restore the team to the CURRENT
+              official Bug Hunt phase while keeping its existing score/progress.
+            */
+            if (event === "Bug Hunt" && team.security.disqualified) {
+                const bugControl = await bugRoutes.getControl();
+                const bugPhase = bugRoutes.phaseFrom(bugControl).key;
+
+                if (bugPhase === "completed") {
+                    return res.status(409).json({
+                        message: "Bug Hunt has already finished. Use RESET BUG HUNT only if you are intentionally starting a fresh event."
+                    });
+                }
+
+                if (bugPhase === "final") {
+                    if (!(Number(team.rank) >= 1 && Number(team.rank) <= 3)) {
+                        return res.status(409).json({
+                            message: "Qualification is already finished and this team was not a Top 3 finalist."
+                        });
+                    }
+                    team.currentRound = "final";
+                    team.currentStage = nextIncompleteBugStage(team, "final");
+                } else if (["round1", "round2", "round3", "surprise"].includes(bugPhase)) {
+                    team.currentRound = bugPhase;
+                    team.currentStage = nextIncompleteBugStage(team, bugPhase);
+                } else {
+                    team.currentRound = "waiting_start";
+                    team.currentStage = 1;
+                }
+            }
+
             team.security.disqualified = false;
             team.security.locked = false;
             team.security.lockReason = "";
@@ -608,6 +648,59 @@ router.post("/checkmate/match/:id/end", requireAdmin, async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Server error" });
+    }
+});
+
+/* ---------------- Fresh Bug Hunt event reset ---------------- */
+router.post("/bughunt/reset", requireAdmin, async (req, res) => {
+    try {
+        if (clean(req.body?.confirm) !== "RESET BUG HUNT") {
+            return res.status(400).json({ message: "Type RESET BUG HUNT to confirm the fresh-event reset" });
+        }
+
+        /*
+          BugHuntTeam is competition-only state. Approved registrations live in
+          REGISTRATION_MONGODB_URI and are NOT deleted here. Deleting these test
+          team records clears yesterday's scores, DQ flags, ranks, final results
+          and old competition sessions. Teams are recreated on their next login.
+        */
+        const cleared = await BugHuntTeam.deleteMany({});
+
+        await BugHuntControl.findOneAndUpdate(
+            { key: "bughunt" },
+            {
+                $set: {
+                    startedAt: null,
+                    startedBy: "",
+                    finalizedAt: null
+                }
+            },
+            { upsert: true, new: true }
+        );
+
+        await EventControl.findOneAndUpdate(
+            { event: "Bug Hunt" },
+            {
+                $set: {
+                    status: "not_started",
+                    startedAt: null,
+                    pausedAt: null,
+                    totalPausedMs: 0,
+                    startedBy: "",
+                    updatedBy: req.admin?.email || "admin"
+                }
+            },
+            { upsert: true, new: true }
+        );
+
+        res.json({
+            message: `Bug Hunt reset for a fresh start. ${Number(cleared.deletedCount || 0)} old competition team record(s) cleared. Approved registrations are safe.`,
+            clearedTeams: Number(cleared.deletedCount || 0),
+            registrationDataChanged: false
+        });
+    } catch (error) {
+        console.error("Bug Hunt reset error:", error);
+        res.status(500).json({ message: "Could not reset Bug Hunt" });
     }
 });
 
