@@ -31,6 +31,7 @@ int findMax(int a[], int n) {
 
 Which line/idea creates a value that was never in the contest, and why?`,
    placeholder:"Example: line 2 or max=0",answers:["line 2","2","max=0","int max = 0"],
+   validate:(a)=>{const s=compact(a);return s==="2"||s.includes("line2")||s.includes("max=0")||s.includes("intmax=0")||(s.includes("max")&&s.includes("initial")&&s.includes("0"))},
    hints:hints("Look at a value that never appears in the input.","Ask whether max=0 is safe for every possible array.","Initialize from a[0] or a safe lower value."),
    ui:{kind:"code-lines",code:["int findMax(int a[], int n) {","  int max = 0;","  for (int i=0; i<n; i++) {","    if (a[i] > max)","      max = a[i];","  }","  return max;","}"],choices:["Line 2","Line 3","Line 4","Line 5"]}
   },
@@ -47,6 +48,7 @@ The specification only says “ordinary arithmetic mean.”
 
 Where is the bug: code, test expectation, or nowhere?`,
    placeholder:"A, B or C",answers:["b","test expectation bug","test bug"],
+   validate:(a)=>{const raw=String(a??"").trim().toLowerCase(),s=compact(a);return raw==="b"||raw.startsWith("b -")||raw.startsWith("b-")||(s.includes("test")&&(s.includes("expect")||s.includes("expected"))&&(s.includes("bug")||s.includes("wrong")||s.includes("incorrect")))},
    hints:hints("Calculate the arithmetic mean manually.","Check whether integer truncation was required.","The test expectation can be wrong too."),
    ui:{kind:"choices",choices:["A - Code bug","B - Test expectation bug","C - No bug"]}
   },
@@ -57,7 +59,8 @@ Where is the bug: code, test expectation, or nowhere?`,
 With n=8 the decision is TRUE and the wrong label appears.
 
 Do you change the condition, the outputs, or the wires?`,
-   placeholder:"Example: swap branches",answers:["swap branches","swap outputs","yes even no odd","yes->even no->odd"],
+   placeholder:"Example: swap branches",answers:["swap branches","swap outputs","yes even no odd","yes->even no->odd","swap output branches"],
+   validate:(a)=>{const s=compact(a);return s.includes("swapbranches")||s.includes("swapoutputbranches")||((s.includes("yes")&&s.includes("even"))&&(s.includes("no")&&s.includes("odd")))},
    hints:hints("The decision expression is correct.","For n=8 the decision is TRUE.","YES must lead to EVEN."),
    ui:{kind:"flowchart",nodes:["READ n","n % 2 == 0 ?","YES -> PRINT ODD","NO -> PRINT EVEN"],choices:["Swap output branches","Change condition to n%2==1","No bug"]}
   },
@@ -68,7 +71,8 @@ Do you change the condition, the outputs, or the wires?`,
 for (int i=0; i<=n; i++) total += a[i];
 
 Find the smallest boundary fix that guarantees the loop touches only real samples.`,
-   placeholder:"Correct loop condition",answers:["i < n","i<n","for(int i=0;i<n;i++)"],
+   placeholder:"Correct loop condition",answers:["i < n","i<n","for(int i=0;i<n;i++)","i <= n-1","i<=n-1"],
+   validate:(a)=>{const raw=String(a??"").toLowerCase();return /\bi\s*<\s*n\b(?!\s*-\s*\d)/.test(raw)||/\bi\s*<=\s*n\s*-\s*1\b/.test(raw)},
    hints:hints("Valid indices are 0,1,2.","What happens when i becomes 3?","The fix changes <= to <."),
    ui:{kind:"code-lines",code:["int total = 0;","for (int i = 0; i <= n; i++) {","  total += a[i];","}"],choices:["i < n","i <= n-1","i < n-1"]}
   }

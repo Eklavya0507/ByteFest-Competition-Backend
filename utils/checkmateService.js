@@ -50,21 +50,36 @@ function commitElapsed(match, now = Date.now()) {
     match.turnStartedAt = new Date(now);
 }
 
+function compareCheckmatePlayers(a, b) {
+    if (a.tournamentPoints !== b.tournamentPoints) return b.tournamentPoints - a.tournamentPoints;
+    if (a.wins !== b.wins) return b.wins - a.wins;
+    const diffA = Number(a.materialFor || 0) - Number(a.materialAgainst || 0);
+    const diffB = Number(b.materialFor || 0) - Number(b.materialAgainst || 0);
+    if (diffA !== diffB) return diffB - diffA;
+    return Number(a.totalMoves || 0) - Number(b.totalMoves || 0);
+}
+
 async function refreshRanks() {
     const players = await CheckmatePlayer.find({});
-    players.sort((a, b) => {
-        if (a.tournamentPoints !== b.tournamentPoints) return b.tournamentPoints - a.tournamentPoints;
-        if (a.wins !== b.wins) return b.wins - a.wins;
-        const diffA = Number(a.materialFor || 0) - Number(a.materialAgainst || 0);
-        const diffB = Number(b.materialFor || 0) - Number(b.materialAgainst || 0);
-        if (diffA !== diffB) return diffB - diffA;
-        return Number(a.totalMoves || 0) - Number(b.totalMoves || 0);
-    });
+    const usedManualRanks = new Set(
+        players
+            .filter(player => player.rankSource === "manual" && Number.isInteger(Number(player.rank)) && Number(player.rank) > 0)
+            .map(player => Number(player.rank))
+    );
 
-    for (let index = 0; index < players.length; index += 1) {
-        players[index].rank = index + 1;
-        await players[index].save();
+    const automatic = players
+        .filter(player => player.rankSource !== "manual")
+        .sort(compareCheckmatePlayers);
+
+    let nextRank = 1;
+    for (const player of automatic) {
+        while (usedManualRanks.has(nextRank)) nextRank += 1;
+        player.rank = nextRank;
+        player.rankSource = "auto";
+        nextRank += 1;
     }
+
+    await Promise.all(players.map(player => player.save()));
 }
 
 async function applyResultToPlayers(match) {
@@ -230,6 +245,7 @@ module.exports = {
     derivedTimes,
     commitElapsed,
     refreshRanks,
+    compareCheckmatePlayers,
     finalizeMatch,
     checkTimeout,
     materialAdjudicationIfNeeded,

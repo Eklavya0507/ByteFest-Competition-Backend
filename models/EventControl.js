@@ -5,7 +5,7 @@ const schema = new mongoose.Schema({
         type: String,
         required: true,
         unique: true,
-        enum: ["Code Sprint", "Bug Hunt", "Checkmate"]
+        enum: ["Bug Hunt", "Checkmate"]
     },
     status: {
         type: String,

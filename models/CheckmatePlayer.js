@@ -16,7 +16,9 @@ const schema = new mongoose.Schema({
     totalMoves: { type: Number, default: 0 },
 
     rank: { type: Number, default: null },
-    finalPlace: { type: Number, default: null }
+    rankSource: { type: String, enum: ["auto", "manual"], default: "auto" },
+    finalPlace: { type: Number, default: null },
+    finalPlaceSource: { type: String, enum: ["auto", "manual"], default: "auto" }
 }, { timestamps: true });
 
 module.exports = mongoose.model("CheckmatePlayer", schema);

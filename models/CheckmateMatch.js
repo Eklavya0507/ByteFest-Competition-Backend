@@ -92,7 +92,8 @@ const schema = new mongoose.Schema({
 }, { timestamps: true });
 
 schema.index({ phase: 1, boardNumber: 1 });
-schema.index({ whiteRegistrationId: 1, status: 1 });
-schema.index({ blackRegistrationId: 1, status: 1 });
+schema.index({ whiteRegistrationId: 1, status: 1, createdAt: -1 });
+schema.index({ blackRegistrationId: 1, status: 1, createdAt: -1 });
+schema.index({ status: 1, createdAt: -1 });
 
 module.exports = mongoose.model("CheckmateMatch", schema);

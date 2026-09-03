@@ -3,32 +3,85 @@ const { requireAdmin } = require("../utils/adminAuth");
 const { listApprovedRegistrations, findRegistration } = require("../utils/registrationDb");
 const { makeCompetitionPassword, clean } = require("../utils/competitionPassword");
 
-const CodeSprintTeam = require("../models/CodeSprintTeam");
 const BugHuntTeam = require("../models/BugHuntTeam");
 const BugHuntControl = require("../models/BugHuntControl");
 const CheckmatePlayer = require("../models/CheckmatePlayer");
 const CheckmateMatch = require("../models/CheckmateMatch");
 const EventControl = require("../models/EventControl");
 const { standardWorkbook, checkmateWorkbook } = require("../utils/reportWorkbook");
+const bugHuntQuestions = require("../config/bughuntQuestions");
 
 const checkmateAuth = require("../utils/checkmateAuth");
+const bugAuth = require("../utils/bugHuntAuth");
 const bugRoutes = require("./bughunt");
 const {
     refreshRanks,
+    compareCheckmatePlayers,
     publicMatch,
     pauseMatch,
     resumeMatch,
     finalizeMatch,
-    checkTimeout
+    checkTimeout,
+    commitElapsed
 } = require("../utils/checkmateService");
 
 const router = express.Router();
-const EVENTS = ["Code Sprint", "Bug Hunt", "Checkmate"];
+const EVENTS = ["Bug Hunt", "Checkmate"];
 
 function names(registration) {
     return [registration?.participant?.name, ...(registration?.members || []).map(member => member?.name)]
         .map(clean)
         .filter(Boolean);
+}
+
+function bugHasEntered(team) {
+    if (!team) return false;
+    if (team.enteredAt) return true;
+    if (team.currentRound && team.currentRound !== "waiting_start") return true;
+    return Object.values(team.progress || {}).some(round => Boolean(round?.startedAt));
+}
+
+async function syncBugHuntRegistrationTeams() {
+    const registrations = await listApprovedRegistrations("Bug Hunt");
+    if (!registrations.length) return 0;
+    const operations = registrations
+        .filter(registration => clean(registration.registrationId) && clean(registration.teamName))
+        .map(registration => {
+            const registrationId = clean(registration.registrationId).toUpperCase();
+            return {
+                updateOne: {
+                    filter: { registrationId },
+                    update: {
+                        $setOnInsert: {
+                            registrationId,
+                            teamId: registrationId,
+                            enteredAt: null,
+                            currentRound: "waiting_start",
+                            currentStage: 1
+                        },
+                        $set: {
+                            teamName: clean(registration.teamName),
+                            members: names(registration),
+                            passwordHash: bugAuth.hashPassword(makeCompetitionPassword(registration))
+                        }
+                    },
+                    upsert: true
+                }
+            };
+        });
+    if (operations.length) await BugHuntTeam.bulkWrite(operations, { ordered: false });
+    return operations.length;
+}
+
+function bugResumePosition(team) {
+    if (Number(team.rank) >= 1 && Number(team.rank) <= 3 && team.progress?.final?.startedAt && !team.progress?.final?.completedAt) {
+        return { round: "final", stage: nextIncompleteBugStage(team, "final") };
+    }
+    if (team.progress?.surprise?.completedAt) return { round: "awaiting_ranking", stage: 1 };
+    for (const key of ["surprise", "round3", "round2", "round1"]) {
+        if (team.progress?.[key]?.startedAt) return { round: key, stage: nextIncompleteBugStage(team, key) };
+    }
+    return { round: "waiting_start", stage: 1 };
 }
 
 function score(team, key) {
@@ -48,37 +101,68 @@ function nextIncompleteBugStage(team, roundKey) {
 }
 
 async function getEventControl(event) {
-    return EventControl.findOneAndUpdate(
-        { event },
-        { $setOnInsert: { event } },
-        { upsert: true, new: true }
-    );
+    let control = await EventControl.findOne({ event });
+    if (!control) control = await EventControl.create({ event });
+    return control;
 }
 
-async function syncCheckmatePlayers() {
-    const registrations = await listApprovedRegistrations("Checkmate");
+let checkmateRegistrationCache = [];
+let checkmateRegistrationCacheAt = 0;
+let checkmateSyncPromise = null;
+const CHECKMATE_SYNC_TTL_MS = 30000;
 
-    for (const registration of registrations) {
-        const registrationId = clean(registration.registrationId).toUpperCase();
-        const playerName = clean(registration?.participant?.name);
-        if (!registrationId || !playerName) continue;
-
-        const password = makeCompetitionPassword(registration);
-        await CheckmatePlayer.findOneAndUpdate(
-            { registrationId },
-            {
-                $set: {
-                    playerName,
-                    passwordHash: checkmateAuth.hashPassword(password)
-                },
-                $setOnInsert: { registrationId }
-            },
-            { upsert: true, new: true }
-        );
+async function syncCheckmatePlayers(force = false) {
+    const now = Date.now();
+    if (!force && checkmateRegistrationCache.length && now - checkmateRegistrationCacheAt < CHECKMATE_SYNC_TTL_MS) {
+        return checkmateRegistrationCache;
     }
+    if (checkmateSyncPromise) return checkmateSyncPromise;
 
-    await refreshRanks();
-    return registrations;
+    checkmateSyncPromise = (async () => {
+        const registrations = await listApprovedRegistrations("Checkmate");
+        const ids = registrations.map(item => clean(item.registrationId).toUpperCase()).filter(Boolean);
+        const existing = await CheckmatePlayer.find({ registrationId: { $in: ids } }).lean();
+        const existingMap = new Map(existing.map(player => [player.registrationId, player]));
+        const operations = [];
+
+        for (const registration of registrations) {
+            const registrationId = clean(registration.registrationId).toUpperCase();
+            const playerName = clean(registration?.participant?.name);
+            if (!registrationId || !playerName) continue;
+
+            const passwordHash = checkmateAuth.hashPassword(makeCompetitionPassword(registration));
+            const current = existingMap.get(registrationId);
+            if (!current) {
+                operations.push({
+                    updateOne: {
+                        filter: { registrationId },
+                        update: { $setOnInsert: { registrationId }, $set: { playerName, passwordHash } },
+                        upsert: true
+                    }
+                });
+            } else if (current.playerName !== playerName || current.passwordHash !== passwordHash) {
+                operations.push({
+                    updateOne: {
+                        filter: { registrationId },
+                        update: { $set: { playerName, passwordHash } }
+                    }
+                });
+            }
+        }
+
+        const needsRankRefresh = operations.length > 0 || existing.some(player => !player.rank);
+        if (operations.length) await CheckmatePlayer.bulkWrite(operations, { ordered: false });
+        if (needsRankRefresh) await refreshRanks();
+        checkmateRegistrationCache = registrations;
+        checkmateRegistrationCacheAt = Date.now();
+        return registrations;
+    })();
+
+    try {
+        return await checkmateSyncPromise;
+    } finally {
+        checkmateSyncPromise = null;
+    }
 }
 
 async function checkmateRows() {
@@ -124,7 +208,9 @@ async function checkmateRows() {
                 materialDifferential: Number(player.materialFor || 0) - Number(player.materialAgainst || 0),
                 totalMoves: Number(player.totalMoves || 0),
                 rank: player.rank || null,
+                rankSource: player.rankSource || "auto",
                 finalPlace: player.finalPlace || null,
+                finalPlaceSource: player.finalPlaceSource || "auto",
                 currentMaterial,
                 moves,
                 currentMatch: current ? {
@@ -138,44 +224,124 @@ async function checkmateRows() {
         });
 }
 
+
+function bugQualificationScore(team) {
+    return score(team, "round1") + score(team, "round2") + score(team, "round3") + score(team, "surprise");
+}
+
+function compareCodeQualification(a, b) {
+    const scoreA = codeQualificationScore(a);
+    const scoreB = codeQualificationScore(b);
+    if (scoreA !== scoreB) return scoreB - scoreA;
+    if (Number(a.totalHintsUsed || 0) !== Number(b.totalHintsUsed || 0)) {
+        return Number(a.totalHintsUsed || 0) - Number(b.totalHintsUsed || 0);
+    }
+    const qa = score(a, "qualifier");
+    const qb = score(b, "qualifier");
+    if (qa !== qb) return qb - qa;
+    if (Number(a.correctStages || 0) !== Number(b.correctStages || 0)) {
+        return Number(b.correctStages || 0) - Number(a.correctStages || 0);
+    }
+    return stageCompletionTotal(a, ["round1", "round2", "qualifier"])
+        - stageCompletionTotal(b, ["round1", "round2", "qualifier"]);
+}
+
+function roundDetails(event, team) {
+    if (!team) return [];
+    const config = bugHuntQuestions;
+    return Object.entries(config).map(([key, round]) => {
+        const progress = team.progress?.[key] || {};
+        const totalStages = Number(round?.stages?.length || 0);
+        let completedStages = 0;
+        for (let index = 1; index <= totalStages; index += 1) {
+            if (progress?.stages?.[`stage${index}`]?.completedAt) completedStages += 1;
+        }
+        const started = Boolean(progress.startedAt)
+            || Object.values(progress.stages || {}).some(stage => Boolean(stage?.startedAt));
+        return {
+            key,
+            title: round?.title || key,
+            score: score(team, key),
+            completedStages,
+            totalStages,
+            started,
+            completed: Boolean(progress.completedAt) || (totalStages > 0 && completedStages >= totalStages)
+        };
+    }).filter(item => item.started || item.completed || item.score > 0 || item.key === team.currentRound);
+}
+
+function progressLabel(event, team, details) {
+    if (!team) return "NOT ENTERED";
+    if (team.security?.disqualified) return "DISQUALIFIED";
+    if (team.currentRound === "eliminated") return "ELIMINATED";
+    if (team.currentRound === "completed") return team.finalPlace || team.knockout?.finalPlace
+        ? `COMPLETED · PLACE #${team.finalPlace || team.knockout?.finalPlace}`
+        : "COMPLETED";
+    if (team.currentRound === "awaiting_ranking") return "SURPRISE COMPLETE · WAITING FOR QUALIFICATION";
+    if (String(team.currentRound || "").endsWith("_wait")) return `${String(team.currentRound).replaceAll("_", " ").toUpperCase()} · WAITING`;
+    if (team.currentRound === "waiting_start") return "WAITING FOR EVENT START";
+
+    const current = details.find(item => item.key === team.currentRound);
+    if (!current) return String(team.currentRound || "NOT STARTED").replaceAll("_", " ").toUpperCase();
+    if (current.completed) {
+        if (event === "Bug Hunt" && current.key === "surprise") return "SURPRISE COMPLETE · WAITING FOR QUALIFICATION";
+        if (current.key === "final") return "FINAL COMPLETE · WAITING FOR RESULT";
+        return `${current.key.replaceAll("_", " ").toUpperCase()} COMPLETE · WAITING`;
+    }
+    if (!current.started) return `${current.key.replaceAll("_", " ").toUpperCase()} · NOT STARTED`;
+    return `${current.key.replaceAll("_", " ").toUpperCase()} · STAGE ${Math.min(Number(team.currentStage || 1), current.totalStages || 1)}/${current.totalStages || 1}`;
+}
+
 router.get("/registrations", requireAdmin, async (req, res) => {
     try {
         const event = normalizeEvent(req.query.event);
-        if (!event) return res.status(400).json({ message: "Select Code Sprint, Bug Hunt or Checkmate" });
+        if (!event) return res.status(400).json({ message: "Select Bug Hunt or Checkmate" });
 
         if (event === "Checkmate") {
             return res.json(await checkmateRows());
         }
 
-        const registrations = await listApprovedRegistrations(event);
-        const Model = event === "Code Sprint" ? CodeSprintTeam : BugHuntTeam;
-        const states = await Model.find({
+        const registrations = await listApprovedRegistrations("Bug Hunt");
+        const states = await BugHuntTeam.find({
             registrationId: { $in: registrations.map(registration => registration.registrationId) }
         }).lean();
 
         const map = new Map(states.map(state => [state.registrationId, state]));
+        const activeForPreview = states.filter(state => !state.security?.disqualified && bugHasEntered(state));
+        const sortedPreview = [...activeForPreview].sort(bugRoutes.compareQualification);
+        const liveRankMap = new Map(sortedPreview.map((state, index) => [state.registrationId, index + 1]));
 
         const rows = registrations.map(registration => {
             const state = map.get(registration.registrationId);
+            const details = roundDetails("Bug Hunt", state);
+            const qualification = bugQualificationScore(state);
+            const entered = bugHasEntered(state);
             return {
                 registrationId: registration.registrationId,
                 teamName: registration.teamName || "",
                 members: names(registration),
                 password: registration.teamName ? makeCompetitionPassword(registration) : "TEAM NAME NOT SET",
-                loggedIn: Boolean(state),
+                loggedIn: entered,
                 currentRound: state?.currentRound || "not_started",
                 currentStage: state?.currentStage || 1,
-                totalScore: event === "Code Sprint"
-                    ? Number(state?.totalScore || 0)
-                    : Number(state?.qualificationScore || 0),
+                progressLabel: state?.security?.disqualified
+                    ? progressLabel("Bug Hunt", state, details)
+                    : entered ? progressLabel("Bug Hunt", state, details) : "NOT ENTERED · WAITING LOGIN",
+                progressDetails: details,
+                totalScore: qualification,
+                qualificationScore: qualification,
                 round1: score(state, "round1"),
                 round2: score(state, "round2"),
-                round3: event === "Bug Hunt" ? score(state, "round3") : undefined,
-                surprise: event === "Bug Hunt" ? score(state, "surprise") : undefined,
-                finalScore: event === "Bug Hunt" ? score(state, "final") : undefined,
+                round3: score(state, "round3"),
+                surprise: score(state, "surprise"),
+                finalScore: score(state, "final"),
                 hints: Number(state?.totalHintsUsed || 0),
+                wrongSubmissions: Number(state?.wrongSubmissions || 0),
+                liveRank: state && !state.security?.disqualified ? liveRankMap.get(state.registrationId) || null : null,
                 rank: state?.rank || null,
-                finalPlace: state?.finalPlace || state?.knockout?.finalPlace || null,
+                rankSource: state?.rankSource || "auto",
+                finalPlace: state?.finalPlace || null,
+                finalPlaceSource: state?.finalPlaceSource || "auto",
                 violations: Number(state?.security?.violations || 0),
                 locked: Boolean(state?.security?.locked),
                 disqualified: Boolean(state?.security?.disqualified)
@@ -195,18 +361,12 @@ router.get("/registrations", requireAdmin, async (req, res) => {
 
 router.patch("/team/:event/:registrationId/security", requireAdmin, async (req, res) => {
     try {
-        const event = decodeURIComponent(req.params.event);
+        const event = normalizeEvent(decodeURIComponent(req.params.event));
         const id = clean(req.params.registrationId).toUpperCase();
         const action = clean(req.body?.action).toLowerCase();
+        if (event !== "Bug Hunt") return res.status(400).json({ message: "Team security control is available for Bug Hunt" });
 
-        const Model =
-            event === "Code Sprint" ? CodeSprintTeam :
-            event === "Bug Hunt" ? BugHuntTeam :
-            null;
-
-        if (!Model) return res.status(400).json({ message: "Unsupported event" });
-
-        const team = await Model.findOne({ registrationId: id });
+        const team = await BugHuntTeam.findOne({ registrationId: id });
         if (!team) return res.status(404).json({ message: "Team has not entered the competition yet" });
 
         if (action === "unlock") {
@@ -220,39 +380,22 @@ router.patch("/team/:event/:registrationId/security", requireAdmin, async (req, 
             team.security.locked = true;
             team.currentRound = "eliminated";
         } else if (action === "resume") {
-            /*
-              ONE MORE CHANCE for a disqualified Bug Hunt team.
-              DQ changes currentRound to "eliminated", so simply clearing the
-              disqualified flag is not enough. Restore the team to the CURRENT
-              official Bug Hunt phase while keeping its existing score/progress.
-            */
-            if (event === "Bug Hunt" && team.security.disqualified) {
+            if (team.security.disqualified) {
                 const bugControl = await bugRoutes.getControl();
-                const bugPhase = bugRoutes.phaseFrom(bugControl).key;
-
-                if (bugPhase === "completed") {
+                if (bugControl?.finalizedAt) {
                     return res.status(409).json({
-                        message: "Bug Hunt has already finished. Use RESET BUG HUNT only if you are intentionally starting a fresh event."
+                        message: "Bug Hunt has already finished. Use RESET BUG HUNT only for an intentional fresh event."
                     });
                 }
-
-                if (bugPhase === "final") {
-                    if (!(Number(team.rank) >= 1 && Number(team.rank) <= 3)) {
-                        return res.status(409).json({
-                            message: "Qualification is already finished and this team was not a Top 3 finalist."
-                        });
-                    }
-                    team.currentRound = "final";
-                    team.currentStage = nextIncompleteBugStage(team, "final");
-                } else if (["round1", "round2", "round3", "surprise"].includes(bugPhase)) {
-                    team.currentRound = bugPhase;
-                    team.currentStage = nextIncompleteBugStage(team, bugPhase);
-                } else {
-                    team.currentRound = "waiting_start";
+                const restore = bugResumePosition(team);
+                team.currentRound = restore.round;
+                team.currentStage = restore.stage;
+                const control = await getEventControl("Bug Hunt");
+                if (control.status === "running" && team.currentRound === "waiting_start" && bugHasEntered(team)) {
+                    team.currentRound = "round1";
                     team.currentStage = 1;
                 }
             }
-
             team.security.disqualified = false;
             team.security.locked = false;
             team.security.lockReason = "";
@@ -268,6 +411,155 @@ router.patch("/team/:event/:registrationId/security", requireAdmin, async (req, 
     }
 });
 
+router.patch("/team/:event/:registrationId/rank", requireAdmin, async (req, res) => {
+    try {
+        const event = normalizeEvent(decodeURIComponent(req.params.event));
+        const id = clean(req.params.registrationId).toUpperCase();
+        if (!event) return res.status(400).json({ message: "Unsupported event" });
+
+        const raw = req.body?.rank;
+        const resetToAuto = raw === null || raw === "" || clean(raw).toLowerCase() === "auto" || Number(raw) === 0;
+        const rank = resetToAuto ? null : Number(raw);
+        if (!resetToAuto && (!Number.isInteger(rank) || rank < 1)) {
+            return res.status(400).json({ message: "Rank must be a positive whole number, or use AUTO" });
+        }
+
+        if (event === "Checkmate") {
+            const player = await CheckmatePlayer.findOne({ registrationId: id });
+            if (!player) return res.status(404).json({ message: "Checkmate player not found" });
+            const playerCount = await CheckmatePlayer.countDocuments({});
+            if (!resetToAuto && rank > playerCount) {
+                return res.status(400).json({ message: `Rank must be between 1 and ${playerCount}` });
+            }
+            if (!resetToAuto) {
+                const duplicate = await CheckmatePlayer.findOne({ registrationId: { $ne: id }, rank, rankSource: "manual" });
+                if (duplicate) return res.status(409).json({ message: `Manual rank #${rank} is already assigned to ${duplicate.playerName}` });
+                player.rank = rank;
+                player.rankSource = "manual";
+            } else {
+                player.rankSource = "auto";
+            }
+            await player.save();
+            await refreshRanks();
+            return res.json({ message: resetToAuto ? "Checkmate rank returned to AUTO" : `Manual rank #${rank} saved`, registrationId: id });
+        }
+
+        const team = await BugHuntTeam.findOne({ registrationId: id });
+        if (!team) return res.status(404).json({ message: "Team has not entered the competition yet" });
+        if (team.security?.disqualified) return res.status(409).json({ message: "A disqualified team cannot receive a qualification rank" });
+
+        const active = await BugHuntTeam.find({ "security.disqualified": { $ne: true } });
+        if (!resetToAuto && rank > active.length) {
+            return res.status(400).json({ message: `Rank must be between 1 and ${active.length}` });
+        }
+
+        const [readiness, bugStatus] = await Promise.all([
+            bugRoutes.qualificationReadiness(),
+            bugRoutes.competitionStatus()
+        ]);
+        if (bugStatus === "completed") {
+            return res.status(409).json({ message: "Bug Hunt is already complete. Use SET FINAL to correct the final result." });
+        }
+        if (!readiness.allReady) {
+            return res.status(409).json({
+                message: `Manual qualification rank is available after every active team finishes Surprise. ${readiness.pendingTeams.length} team(s) are still in progress.`
+            });
+        }
+
+        if (!resetToAuto) {
+            const duplicate = active.find(item => item.registrationId !== id && Number(item.rank) === rank && item.rankSource === "manual");
+            if (duplicate) return res.status(409).json({ message: `Manual rank #${rank} is already assigned to ${duplicate.teamName}` });
+            team.rank = rank;
+            team.rankSource = "manual";
+        } else {
+            team.rankSource = "auto";
+            team.rank = null;
+        }
+        await team.save();
+        await bugRoutes.finalizeQualification(true);
+
+        res.json({
+            message: resetToAuto ? "Bug Hunt rank returned to AUTO" : `Manual rank #${rank} saved for ${team.teamName}`,
+            registrationId: id
+        });
+    } catch (error) {
+        console.error("Manual rank error:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+router.patch("/team/:event/:registrationId/final-place", requireAdmin, async (req, res) => {
+    try {
+        const event = normalizeEvent(decodeURIComponent(req.params.event));
+        const id = clean(req.params.registrationId).toUpperCase();
+        if (!event) return res.status(400).json({ message: "Unsupported event" });
+
+        const raw = req.body?.finalPlace;
+        const resetToAuto = raw === null || raw === "" || clean(raw).toLowerCase() === "auto" || Number(raw) === 0;
+        const place = resetToAuto ? null : Number(raw);
+        if (!resetToAuto && (!Number.isInteger(place) || place < 1)) {
+            return res.status(400).json({ message: "Final place must be a positive whole number, or use AUTO" });
+        }
+
+        if (event === "Checkmate") {
+            const player = await CheckmatePlayer.findOne({ registrationId: id });
+            if (!player) return res.status(404).json({ message: "Checkmate player not found" });
+            const playerCount = await CheckmatePlayer.countDocuments({});
+            if (!resetToAuto && place > playerCount) {
+                return res.status(400).json({ message: `Final place must be between 1 and ${playerCount}` });
+            }
+            if (!resetToAuto) {
+                const duplicate = await CheckmatePlayer.findOne({ registrationId: { $ne: id }, finalPlace: place, finalPlaceSource: "manual" });
+                if (duplicate) return res.status(409).json({ message: `Manual final place #${place} is already assigned to ${duplicate.playerName}` });
+                player.finalPlace = place;
+                player.finalPlaceSource = "manual";
+            } else {
+                player.finalPlace = null;
+                player.finalPlaceSource = "auto";
+            }
+            await player.save();
+            return res.json({
+                message: resetToAuto ? "Checkmate final place cleared to AUTO" : `Manual final place #${place} saved`,
+                registrationId: id
+            });
+        }
+
+        const team = await BugHuntTeam.findOne({ registrationId: id });
+        if (!team) return res.status(404).json({ message: "Team has not entered the competition yet" });
+        if (team.security?.disqualified) return res.status(409).json({ message: "A disqualified team cannot receive a final place" });
+        if (!(Number(team.rank) >= 1 && Number(team.rank) <= 3)) {
+            return res.status(409).json({ message: "Only Bug Hunt Top 3 finalists can receive a final place" });
+        }
+
+        const finalists = await BugHuntTeam.find({ rank: { $gte: 1, $lte: 3 }, "security.disqualified": { $ne: true } });
+        if (!resetToAuto && place > finalists.length) {
+            return res.status(400).json({ message: `Final place must be between 1 and ${finalists.length}` });
+        }
+        if (!resetToAuto) {
+            const duplicate = finalists.find(item => item.registrationId !== id && Number(item.finalPlace) === place && item.finalPlaceSource === "manual");
+            if (duplicate) return res.status(409).json({ message: `Manual final place #${place} is already assigned to ${duplicate.teamName}` });
+            team.finalPlace = place;
+            team.finalPlaceSource = "manual";
+        } else {
+            team.finalPlace = null;
+            team.finalPlaceSource = "auto";
+        }
+        await team.save();
+
+        const finalFinished = finalists.every(item => item.registrationId === id
+            ? Boolean(team.progress?.final?.completedAt)
+            : Boolean(item.progress?.final?.completedAt));
+        if (finalFinished) await bugRoutes.finalizeFinal();
+        return res.json({
+            message: resetToAuto ? "Bug Hunt final place returned to AUTO" : `Manual final place #${place} saved for ${team.teamName}`,
+            registrationId: id
+        });
+    } catch (error) {
+        console.error("Manual final-place error:", error);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
 /* ---------------- Event start / stop / resume ---------------- */
 
 router.get("/control/:event", requireAdmin, async (req, res) => {
@@ -275,9 +567,14 @@ router.get("/control/:event", requireAdmin, async (req, res) => {
         const event = normalizeEvent(decodeURIComponent(req.params.event));
         if (!event) return res.status(400).json({ message: "Unsupported event" });
         const control = await getEventControl(event);
+        let competitionPhase = null;
+        if (event === "Bug Hunt") {
+            competitionPhase = await bugRoutes.competitionStatus();
+        }
         res.json({
             event,
             status: control.status,
+            competitionPhase,
             startedAt: control.startedAt,
             pausedAt: control.pausedAt,
             totalPausedMs: control.totalPausedMs
@@ -296,6 +593,10 @@ router.post("/control/:event/start", requireAdmin, async (req, res) => {
         const control = await getEventControl(event);
         if (control.status === "running") return res.status(409).json({ message: `${event} is already running` });
         if (control.status === "paused") return res.status(409).json({ message: `Use RESUME for ${event}` });
+
+        if (event === "Bug Hunt") {
+            await syncBugHuntRegistrationTeams();
+        }
 
         const now = new Date();
         control.status = "running";
@@ -350,22 +651,17 @@ function shiftDate(value, ms) {
     return value ? new Date(new Date(value).getTime() + ms) : value;
 }
 
-async function shiftCodeSprintTimers(pauseMs) {
+async function shiftBugHuntTimers(pauseMs) {
     if (!pauseMs) return;
-
-    const teams = await CodeSprintTeam.find({});
+    const teams = await BugHuntTeam.find({});
     for (const team of teams) {
         let changed = false;
-        const progress = team.progress || {};
-
-        for (const round of Object.values(progress)) {
+        for (const round of Object.values(team.progress || {})) {
             if (!round || typeof round !== "object") continue;
-
             if (round.startedAt && !round.completedAt) {
                 round.startedAt = shiftDate(round.startedAt, pauseMs);
                 changed = true;
             }
-
             for (const stage of Object.values(round.stages || {})) {
                 if (stage?.startedAt && !stage?.completedAt) {
                     stage.startedAt = shiftDate(stage.startedAt, pauseMs);
@@ -373,7 +669,6 @@ async function shiftCodeSprintTimers(pauseMs) {
                 }
             }
         }
-
         if (changed) {
             team.markModified("progress");
             await team.save();
@@ -395,13 +690,7 @@ router.post("/control/:event/resume", requireAdmin, async (req, res) => {
         const pauseMs = Math.max(0, now.getTime() - new Date(control.pausedAt).getTime());
 
         if (event === "Bug Hunt") {
-            const bugControl = await BugHuntControl.findOne({ key: "bughunt" });
-            if (bugControl?.startedAt) {
-                bugControl.startedAt = shiftDate(bugControl.startedAt, pauseMs);
-                await bugControl.save();
-            }
-        } else if (event === "Code Sprint") {
-            await shiftCodeSprintTimers(pauseMs);
+            await shiftBugHuntTimers(pauseMs);
         } else if (event === "Checkmate") {
             const matches = await CheckmateMatch.find({ status: "paused", pausedByEvent: true });
             for (const match of matches) await resumeMatch(match);
@@ -430,12 +719,11 @@ router.get("/checkmate/matches", requireAdmin, async (req, res) => {
             if (match.status === "running") await checkTimeout(match);
         }
 
-        const freshMatches = await CheckmateMatch.find({}).sort({ createdAt: -1 }).limit(200);
-        const playerIds = [...new Set(freshMatches.flatMap(match => [match.whiteRegistrationId, match.blackRegistrationId]))];
+        const playerIds = [...new Set(matches.flatMap(match => [match.whiteRegistrationId, match.blackRegistrationId]))];
         const players = await CheckmatePlayer.find({ registrationId: { $in: playerIds } }).lean();
         const playerMap = new Map(players.map(player => [player.registrationId, player]));
 
-        res.json(freshMatches.map(match =>
+        res.json(matches.map(match =>
             publicMatch(
                 match,
                 playerMap.get(match.whiteRegistrationId),
@@ -488,7 +776,7 @@ router.post("/checkmate/matches", requireAdmin, async (req, res) => {
             return res.status(404).json({ message: "Black player is not an approved Checkmate registration" });
         }
 
-        await syncCheckmatePlayers();
+        await syncCheckmatePlayers(true);
 
         const busy = await CheckmateMatch.findOne({
             status: { $in: ["waiting", "running", "paused"] },
@@ -709,11 +997,11 @@ router.get("/bughunt/control", requireAdmin, async (req, res) => {
     try {
         const control = await getEventControl("Bug Hunt");
         const bugControl = await bugRoutes.getControl();
-        const currentPhase = bugRoutes.phaseFrom(bugControl);
+        const currentPhase = await bugRoutes.competitionStatus();
         res.json({
             startedAt: bugControl.startedAt,
-            phase: control.status === "paused" ? "paused" : currentPhase.key,
-            phaseEndsAt: currentPhase.endsAt,
+            phase: control.status === "paused" ? "paused" : currentPhase,
+            phaseEndsAt: null,
             finalizedAt: bugControl.finalizedAt
         });
     } catch (error) {
@@ -737,6 +1025,7 @@ router.post("/bughunt/start", requireAdmin, async (req, res) => {
 router.get("/rankings", requireAdmin, async (req, res) => {
     try {
         const event = normalizeEvent(req.query.event);
+        if (!event) return res.status(400).json({ message: "Unsupported event" });
 
         if (event === "Checkmate") {
             const rows = await checkmateRows();
@@ -744,91 +1033,72 @@ router.get("/rankings", requireAdmin, async (req, res) => {
                 registrationId: player.registrationId,
                 teamName: player.playerName,
                 rank: player.rank,
+                rankSource: player.rankSource || "auto",
                 score: player.tournamentPoints,
                 finalPlace: player.finalPlace,
                 status: player.currentMatch?.phase || "waiting"
             })));
         }
 
-        const Model = event === "Bug Hunt" ? BugHuntTeam : CodeSprintTeam;
-        const rows = await Model.find({}).sort({
-            finalPlace: 1,
-            rank: 1,
-            totalScore: -1,
-            qualificationScore: -1
-        }).lean();
-
-        res.json(rows.map(team => ({
+        const rows = await BugHuntTeam.find({}).lean();
+        const mapped = rows.map(team => ({
             registrationId: team.registrationId || team.teamId,
             teamName: team.teamName,
             rank: team.rank || null,
-            score: event === "Bug Hunt"
-                ? Number(team.qualificationScore || 0)
-                : Number(team.totalScore || 0),
-            finalPlace: team.finalPlace || team.knockout?.finalPlace || null,
+            rankSource: team.rankSource || "auto",
+            score: bugQualificationScore(team),
+            finalPlace: team.finalPlace || null,
             status: team.currentRound
-        })));
+        }));
+        mapped.sort((a, b) =>
+            Number(a.finalPlace || 9999) - Number(b.finalPlace || 9999)
+            || Number(a.rank || 9999) - Number(b.rank || 9999)
+            || Number(b.score || 0) - Number(a.score || 0)
+        );
+        res.json(mapped);
     } catch (error) {
+        console.error(error);
         res.status(500).json({ message: "Server error" });
     }
 });
 
-
 /* ---------------- Individual team restart ---------------- */
 router.post("/team/:event/:registrationId/restart", requireAdmin, async (req, res) => {
     try {
-        const event = decodeURIComponent(req.params.event);
+        const event = normalizeEvent(decodeURIComponent(req.params.event));
         const id = clean(req.params.registrationId).toUpperCase();
-        const Model = event === "Code Sprint" ? CodeSprintTeam : event === "Bug Hunt" ? BugHuntTeam : null;
-        if (!Model) return res.status(400).json({ message: "Restart is available for Code Sprint and Bug Hunt" });
+        if (event !== "Bug Hunt") return res.status(400).json({ message: "Team restart is available for Bug Hunt" });
 
-        const team = await Model.findOne({ registrationId: id });
+        const team = await BugHuntTeam.findOne({ registrationId: id });
         if (!team) return res.status(404).json({ message: "Competition record not found. The team may not have logged in yet." });
 
+        const bugControl = await bugRoutes.getControl();
+        if (bugControl?.finalizedAt) {
+            return res.status(409).json({ message: "Bug Hunt is already finalized. Reset the complete Bug Hunt only if you want a fresh event." });
+        }
+
         team.progress = {};
+        team.currentRound = "waiting_start";
         team.currentStage = 1;
+        team.qualificationScore = 0;
+        team.finalScore = 0;
         team.totalHintsUsed = 0;
+        team.wrongSubmissions = 0;
         team.rank = null;
+        team.rankSource = "auto";
+        team.finalPlace = null;
+        team.finalPlaceSource = "auto";
         team.security.violations = 0;
         team.security.locked = false;
         team.security.lockReason = "";
         team.security.disqualified = false;
         team.security.events = [];
-
-        if (event === "Code Sprint") {
-            team.currentRound = "round1";
-            team.totalScore = 0;
-            team.correctStages = 0;
-            team.knockout = {
-                semifinalWinner: null,
-                bestSemifinalLoser: false,
-                wildcardEntryWinner: null,
-                entryFinalWinner: null,
-                wildcardFinalWinner: null,
-                finalPlace: null
-            };
-        } else {
-            const bugControl = await bugRoutes.getControl();
-            const bugPhase = bugRoutes.phaseFrom(bugControl);
-            if (!["waiting_start", "round1"].includes(bugPhase.key)) {
-                return res.status(409).json({
-                    message: "Bug Hunt uses one synchronized official timeline. Full restart is allowed before start or during Round 1 only; later use coordinator unlock or restart the whole Bug Hunt event."
-                });
-            }
-            team.currentRound = bugPhase.key;
-            team.qualificationScore = 0;
-            team.finalScore = 0;
-            team.wrongSubmissions = 0;
-            team.finalPlace = null;
-        }
-
         team.markModified("progress");
         team.markModified("security");
-        if (event === "Code Sprint") team.markModified("knockout");
         await team.save();
 
         res.json({
-            message: `${event} restarted for ${id}. Scores, hints, attempts, rank and security progress were cleared.`,
+            message: `Bug Hunt restarted for ${id}. Scores, hints, attempts, rank and security progress were cleared.`,
             registrationId: id,
             currentRound: team.currentRound
         });
@@ -851,9 +1121,8 @@ router.get("/report/:event.xlsx", requireAdmin, async (req, res) => {
             workbook = await checkmateWorkbook({ players, matches });
         } else {
             const registrations = await listApprovedRegistrations(event);
-            const Model = event === "Code Sprint" ? CodeSprintTeam : BugHuntTeam;
             const approvedIds = registrations.map(item => clean(item.registrationId).toUpperCase()).filter(Boolean);
-            const teams = await Model.find({ registrationId: { $in: approvedIds } }).lean();
+            const teams = await BugHuntTeam.find({ registrationId: { $in: approvedIds } }).lean();
             workbook = await standardWorkbook({ event, registrations, teams });
         }
 

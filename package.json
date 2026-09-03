@@ -1,7 +1,7 @@
 {
   "name": "bytefest-competition-backend",
-  "version": "5.0.0",
-  "description": "BYTEFEST 2026 Code Sprint + Bug Hunt + Checkmate competition backend",
+  "version": "6.0.0",
+  "description": "BYTEFEST 2026 Bug Hunt + Checkmate competition backend",
   "private": true,
   "main": "server.js",
   "scripts": {

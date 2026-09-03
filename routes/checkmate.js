@@ -2,7 +2,7 @@ const express = require("express");
 const CheckmateMatch = require("../models/CheckmateMatch");
 const CheckmatePlayer = require("../models/CheckmatePlayer");
 const EventControl = require("../models/EventControl");
-const { requirePlayer } = require("../utils/checkmateAuth");
+const { requirePlayer, safeEqual, createCoordinatorGrant, verifyCoordinatorGrant } = require("../utils/checkmateAuth");
 const {
     PIECE_VALUES,
     CAPTURE_LIMITS,
@@ -18,11 +18,9 @@ const router = express.Router();
 const MAX_VIOLATIONS = 4;
 
 async function eventControl() {
-    return EventControl.findOneAndUpdate(
-        { event: "Checkmate" },
-        { $setOnInsert: { event: "Checkmate" } },
-        { upsert: true, new: true }
-    );
+    let control = await EventControl.findOne({ event: "Checkmate" });
+    if (!control) control = await EventControl.create({ event: "Checkmate" });
+    return control;
 }
 
 async function currentMatch(registrationId) {
@@ -57,23 +55,21 @@ router.get("/state", requirePlayer, async (req, res) => {
         let match = await currentMatch(player.registrationId);
 
         if (match && match.status === "running") {
-            await checkTimeout(match);
-            match = await CheckmateMatch.findById(match._id);
+            match = await checkTimeout(match);
         }
 
         let publicData = null;
         let you = null;
 
         if (match) {
-            const [whitePlayer, blackPlayer] = await Promise.all([
-                CheckmatePlayer.findOne({ registrationId: match.whiteRegistrationId }),
-                CheckmatePlayer.findOne({ registrationId: match.blackRegistrationId })
-            ]);
+            const isWhite = match.whiteRegistrationId === player.registrationId;
+            const opponentRegistrationId = isWhite ? match.blackRegistrationId : match.whiteRegistrationId;
+            const opponent = await CheckmatePlayer.findOne({ registrationId: opponentRegistrationId }).lean();
+            const whitePlayer = isWhite ? player : opponent;
+            const blackPlayer = isWhite ? opponent : player;
 
             publicData = publicMatch(match, whitePlayer, blackPlayer);
-            you = {
-                color: match.whiteRegistrationId === player.registrationId ? "white" : "black"
-            };
+            you = { color: isWhite ? "white" : "black" };
         }
 
         return res.json({
@@ -121,8 +117,7 @@ router.post("/move", requirePlayer, async (req, res) => {
         let match = await currentMatch(player.registrationId);
         if (!match) return res.status(404).json({ message: "No active Checkmate match" });
 
-        await checkTimeout(match);
-        match = await CheckmateMatch.findById(match._id);
+        match = await checkTimeout(match);
 
         if (match.security?.locked) {
             return res.status(423).json({
@@ -209,16 +204,15 @@ router.post("/move", requirePlayer, async (req, res) => {
         await match.save();
 
         if (boardResult) {
-            await finalizeMatch(match, boardResult, boardResultReason || "Digital chess board result");
+            match = await finalizeMatch(match, boardResult, boardResultReason || "Digital chess board result");
         } else {
-            await materialAdjudicationIfNeeded(match);
+            match = await materialAdjudicationIfNeeded(match);
         }
-        const fresh = await CheckmateMatch.findById(match._id);
 
         return res.json({
-            completed: fresh.status === "completed",
-            message: fresh.status === "completed"
-                ? `${fresh.result.replaceAll("_", " ").toUpperCase()} · ${fresh.resultReason}`
+            completed: match.status === "completed",
+            message: match.status === "completed"
+                ? `${match.result.replaceAll("_", " ").toUpperCase()} · ${match.resultReason}`
                 : `Move recorded${capturedPiece ? ` · captured ${capturedPiece} (${capturedValue} pt)` : ""}.`
         });
     } catch (error) {
@@ -296,30 +290,32 @@ router.post("/security/unlock", requirePlayer, async (req, res) => {
     try {
         const required = String(
             process.env.CHECKMATE_COORDINATOR_PASSWORD ||
-            process.env.CODESPRINT_COORDINATOR_PASSWORD ||
+            process.env.COMPETITION_COORDINATOR_PASSWORD ||
             ""
         );
-        if (!required) {
-            return res.status(503).json({
-                message: "CHECKMATE_COORDINATOR_PASSWORD is not configured"
-            });
-        }
-
-        const password = clean(req.body?.password);
-        const { safeEqual } = require("../utils/checkmateAuth");
-        if (!safeEqual(password, required)) {
-            return res.status(403).json({ message: "Incorrect coordinator password" });
-        }
 
         const player = req.checkmatePlayer;
         const match = await currentMatch(player.registrationId);
         if (!match) return res.status(404).json({ message: "No active Checkmate match" });
+
+        const password = clean(req.body?.password);
+        const grant = clean(req.body?.grant);
+        const grantValid = verifyCoordinatorGrant(grant, player, match);
+        const passwordValid = Boolean(required) && safeEqual(password, required);
+
+        if (!required && !grantValid) {
+            return res.status(503).json({ message: "CHECKMATE_COORDINATOR_PASSWORD is not configured" });
+        }
+        if (!passwordValid && !grantValid) {
+            return res.status(403).json({ message: "Incorrect coordinator password" });
+        }
 
         if (!match.security?.locked) {
             return res.json({
                 unlocked: true,
                 violations: Number(match.security?.violations || 0),
                 maxViolations: MAX_VIOLATIONS,
+                unlockGrant: createCoordinatorGrant(player, match),
                 message: "Checkmate station is already unlocked"
             });
         }
@@ -350,6 +346,8 @@ router.post("/security/unlock", requirePlayer, async (req, res) => {
             unlocked: true,
             violations: Number(match.security.violations || 0),
             maxViolations: MAX_VIOLATIONS,
+            unlockGrant: createCoordinatorGrant(player, match),
+            coordinatorSession: true,
             message: "Checkmate unlocked. Return to fullscreen to continue."
         });
     } catch (error) {

@@ -108,7 +108,7 @@ async function standardWorkbook({ event, registrations, teams }) {
     const team = stateMap.get(safe(reg.registrationId).toUpperCase()) || {};
     const qualification = event === "Bug Hunt"
       ? score(team,"round1") + score(team,"round2") + score(team,"round3") + score(team,"surprise")
-      : num(team.totalScore);
+      : score(team,"round1") + score(team,"round2") + score(team,"qualifier");
     return {
       registrationId: reg.registrationId || team.registrationId || team.teamId,
       teamName: reg.teamName || team.teamName || "",
@@ -116,10 +116,12 @@ async function standardWorkbook({ event, registrations, teams }) {
       email: reg?.participant?.email || "", phone: reg?.participant?.phone || "",
       status: team.currentRound || "NOT LOGGED IN", stage: team.currentStage || "",
       r1: score(team,"round1"), r2: score(team,"round2"), r3: score(team,"round3"), surprise: score(team,"surprise"), qualifier: score(team,"qualifier"),
-      total: event === "Code Sprint" ? num(team.totalScore) : qualification,
+      total: qualification,
       final: score(team,"final"), hints: num(team.totalHintsUsed), wrong: num(team.wrongSubmissions),
       violations: num(team?.security?.violations), dq: Boolean(team?.security?.disqualified),
-      rank: team.rank || "", finalPlace: team.finalPlace || team?.knockout?.finalPlace || ""
+      rank: team.rank || "", rankSource: team.rankSource || "auto",
+      finalPlace: team.finalPlace || team?.knockout?.finalPlace || "",
+      finalPlaceSource: team.finalPlaceSource || team?.knockout?.finalPlaceSource || "auto"
     };
   });
   rows.sort((a,b)=>Number(a.finalPlace||999)-Number(b.finalPlace||999)||Number(a.rank||999)-Number(b.rank||999)||Number(b.total||0)-Number(a.total||0));
@@ -136,17 +138,17 @@ async function standardWorkbook({ event, registrations, teams }) {
   setWidths(summary,[22,3,18,18,18,18,18,18,18,18,18,18]);
 
   const ranking = wb.addWorksheet("Ranking",{views:[{showGridLines:false}]});
-  const headers=["Rank","Final Place","Registration ID","Team Name","Members","Lead Email","Lead Phone","Status","Stage","Round 1","Round 2",...(event==="Bug Hunt"?["Round 3","Surprise"]:["Qualifier"]),"Total / Qualification","Final","Hints","Wrong Attempts","Security Violations","DQ"];
+  const headers=["Rank","Rank Source","Final Place","Final Place Source","Registration ID","Team Name","Members","Lead Email","Lead Phone","Status","Stage","Round 1","Round 2",...(event==="Bug Hunt"?["Round 3","Surprise"]:["Qualifier"]),"Total / Qualification","Final","Hints","Wrong Attempts","Security Violations","DQ"];
   addTitle(ranking,`BYTEFEST 2026 - ${event.toUpperCase()} RANKING`,`Scores are read directly from the competition database.`,headers.length);
   addKpis(ranking,[["Teams",rows.length,CYAN],["Top Score",maxScore,GREEN],["Completed",rows.filter(r=>r.status==="completed").length,ORANGE]]);
   ranking.getRow(5).values=headers; styleHeader(ranking.getRow(5));
   rows.forEach(r=>{
-    const v=[r.rank,r.finalPlace,r.registrationId,r.teamName,r.members,r.email,r.phone,r.status,r.stage,r.r1,r.r2];
+    const v=[r.rank,String(r.rankSource||"auto").toUpperCase(),r.finalPlace,String(r.finalPlaceSource||"auto").toUpperCase(),r.registrationId,r.teamName,r.members,r.email,r.phone,r.status,r.stage,r.r1,r.r2];
     if(event==="Bug Hunt")v.push(r.r3,r.surprise); else v.push(r.qualifier);
     v.push(r.total,r.final,r.hints,event==="Bug Hunt"?r.wrong:"",r.violations,r.dq?"YES":"NO"); ranking.addRow(v);
   });
   styleRows(ranking,6,5+rows.length,1);
-  setWidths(ranking,[8,11,18,24,44,28,16,20,8,10,10,10,10,16,10,8,13,15,8]);
+  setWidths(ranking,[8,12,11,18,18,24,44,28,16,20,8,10,10,10,10,16,10,8,13,15,8]);
   ranking.autoFilter={from:{row:5,column:1},to:{row:5,column:headers.length}};
   ranking.views=[{state:"frozen",ySplit:5,xSplit:4,showGridLines:false}];
 
@@ -170,9 +172,9 @@ async function checkmateWorkbook({ players, matches }) {
   summary.getCell("A6").value="Winner / Leader";summary.getCell("C6").value=sorted[0]?.playerName||"-";summary.mergeCells("C6:H6");setWidths(summary,[22,3,18,18,18,18,18,18,18,18,18,18]);
 
   const ranking=wb.addWorksheet("Player Ranking",{views:[{showGridLines:false}]});
-  const h=["Rank","Final Place","Registration ID","Player","Tournament Points","Wins","Draws","Losses","Capture Points","Material +/-","Total Moves"];
+  const h=["Rank","Rank Source","Final Place","Final Place Source","Registration ID","Player","Tournament Points","Wins","Draws","Losses","Capture Points","Material +/-","Total Moves"];
   addTitle(ranking,"BYTEFEST 2026 - CHECKMATE PLAYER RANKING","League points + capture/material/move records.",h.length);addKpis(ranking,[["Players",players.length,CYAN],["Matches",matches.length,ORANGE],["Top Points",sorted[0]?.tournamentPoints||0,GREEN]]);ranking.getRow(5).values=h;styleHeader(ranking.getRow(5));
-  sorted.forEach(p=>ranking.addRow([p.rank,p.finalPlace,p.registrationId,p.playerName,num(p.tournamentPoints),num(p.wins),num(p.draws),num(p.losses),num(p.capturePoints),num(p.materialFor)-num(p.materialAgainst),num(p.totalMoves)]));styleRows(ranking,6,5+sorted.length,1);setWidths(ranking,[8,11,18,28,16,8,8,8,15,13,12]);ranking.autoFilter={from:{row:5,column:1},to:{row:5,column:h.length}};ranking.views=[{state:"frozen",ySplit:5,xSplit:4,showGridLines:false}];
+  sorted.forEach(p=>ranking.addRow([p.rank,String(p.rankSource||"auto").toUpperCase(),p.finalPlace,String(p.finalPlaceSource||"auto").toUpperCase(),p.registrationId,p.playerName,num(p.tournamentPoints),num(p.wins),num(p.draws),num(p.losses),num(p.capturePoints),num(p.materialFor)-num(p.materialAgainst),num(p.totalMoves)]));styleRows(ranking,6,5+sorted.length,1);setWidths(ranking,[8,12,11,18,18,28,16,8,8,8,15,13,12]);ranking.autoFilter={from:{row:5,column:1},to:{row:5,column:h.length}};ranking.views=[{state:"frozen",ySplit:5,xSplit:4,showGridLines:false}];
 
   const ms=wb.addWorksheet("Match Results",{views:[{showGridLines:false}]});
   const mh=["Board","Phase","White","White ID","Black","Black ID","Status","Result","Reason","White Material","Black Material","White Moves","Black Moves","Full Moves"];

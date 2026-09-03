@@ -5,7 +5,6 @@ require("dotenv").config();
 
 const adminRoutes = require("./routes/admin");
 const participantRoutes = require("./routes/participant");
-const codeSprintRoutes = require("./routes/codesprint");
 const bugHuntModule = require("./routes/bughunt");
 const checkmateRoutes = require("./routes/checkmate");
 const competitionAdminRoutes = require("./routes/competitionAdmin");
@@ -49,15 +48,15 @@ async function getEventControl(event) {
 app.get("/", (req, res) => res.json({
     message: "BYTEFEST Competition Backend is running",
     status: "OK",
-    version: "3.0.0",
-    events: ["Code Sprint", "Bug Hunt", "Checkmate"]
+    version: "6.0.0",
+    events: ["Bug Hunt", "Checkmate"]
 }));
 
 /* Public read-only control state for participant screens. */
 app.get("/api/event-control/:event", async (req, res) => {
     try {
         const event = decodeURIComponent(String(req.params.event || ""));
-        if (!["Code Sprint", "Bug Hunt", "Checkmate"].includes(event)) {
+        if (!["Bug Hunt", "Checkmate"].includes(event)) {
             return res.status(400).json({ message: "Unsupported event" });
         }
         const control = await getEventControl(event);
@@ -74,8 +73,8 @@ app.get("/api/event-control/:event", async (req, res) => {
 });
 
 /*
-  Code Sprint and Bug Hunt challenge actions are blocked while the admin event
-  control is NOT STARTED or STOPPED. State/security endpoints remain available.
+  Bug Hunt challenge actions are blocked while the admin event control is
+  NOT STARTED or STOPPED. State/security endpoints remain available.
 */
 function eventGate(event) {
     return async (req, res, next) => {
@@ -104,7 +103,6 @@ function eventGate(event) {
 
 app.use("/api/admin", adminRoutes);
 app.use("/api/participant", participantRoutes);
-app.use("/api/codesprint", eventGate("Code Sprint"), codeSprintRoutes);
 app.use("/api/bughunt", eventGate("Bug Hunt"), bugHuntModule.router);
 app.use("/api/checkmate", checkmateRoutes);
 app.use("/api/competition/admin", competitionAdminRoutes);
