@@ -1,198 +1,143 @@
-/*
- * BYTEFEST 2026 - BUG HUNT FINAL SELECTED QUESTION BANK (v9 LOGICAL/MOBILE)
- * Mixed code + flowchart + state + logs + hidden-requirement questions.
+/* BYTEFEST 2026 - BUG HUNT v15 PATCH CHALLENGES
+ * C + Python only. No MCQ answers and no expected output shown to participants.
+ * Participants edit/submit the minimum patch. Hidden test status is returned without hidden inputs.
  */
-const HINTS=[10,20,30];
-const hints=(a,b,c)=>[
-  {text:a,penalty:HINTS[0]},
-  {text:b,penalty:HINTS[1]},
-  {text:c,penalty:HINTS[2]}
-];
-const compact=v=>String(v??"").toLowerCase().replace(/\s+/g,"").replace(/[;`]/g,"");
-const includesAll=(v,parts)=>{const s=compact(v);return parts.every(p=>s.includes(compact(p)))};
+const compact = v => String(v ?? "").toLowerCase().replace(/\s+/g, "").replace(/[;`]/g, "");
+const hasAll = (v, parts) => { const s = compact(v); return parts.every(p => s.includes(compact(p))); };
+const oneHint = text => [{ text, penalty: 10 }];
+const result = checks => ({ correct: checks.every(Boolean), passed: checks.filter(Boolean).length, total: checks.length });
 
-module.exports={
- round1:{title:"Round 1 - Bug Radar",durationSeconds:35*60,stages:[
-  {
-   id:"bh-r1-q1-negative-max",title:"Q1 - Negative Maximum",type:"faulty-line",maxPoints:20,
-   prompt:`A scoreboard service works for ordinary scores, but a judge reports this failure:
+module.exports = {
+  round1: { title: "Round 1 - Bug Radar", durationSeconds: 35 * 60, stages: [
+    {
+      id: "bh-r1-q1-negative-max", title: "Q1 - The Invisible Score", maxPoints: 30,
+      prompt: `A scoreboard function behaves normally for common score sets. During judging, an all-negative batch returns 0 even though 0 was never submitted.\n\nPatch the implementation so the returned maximum always comes from valid input data. Keep the solution minimal.`,
+      ui: { kind: "patch-editor", code: ["int findMax(int a[], int n) {", "    int best = 0;", "    for (int i = 0; i < n; i++)", "        if (a[i] > best) best = a[i];", "    return best;", "}"], sampleInput: "[-8, -3, -11, -2]", initialOutput: "0", patchLimit: "MINIMUM PATCH" },
+      hints: oneHint("Consider whether the initial value is guaranteed to belong to the input."),
+      evaluate: p => { const s = compact(p); return result([s.includes("best=a[0]") || s.includes("intbest=a[0]"), !s.includes("best=0"), s.includes("for") || s.includes("a[0]"), s.includes("returnbest")]); },
+      run: p => ({ output: (compact(p).includes("best=a[0]") ? "-2" : "0"), note: "Sample execution only. No expected output is shown." })
+    },
+    {
+      id: "bh-r1-q2-python-alias", title: "Q2 - The Mirrored Grid", maxPoints: 30,
+      prompt: `A Python program creates a 3×3 grid. Changing one cell unexpectedly changes the same column in every row.\n\nPatch only the grid construction. Do not change the assignment that follows.`,
+      ui: { kind: "patch-editor", code: ["grid = [[0] * 3] * 3", "grid[0][1] = 9", "print(grid)"], sampleInput: "No external input", initialOutput: "[[0, 9, 0], [0, 9, 0], [0, 9, 0]]", patchLimit: "CHANGE GRID CONSTRUCTION ONLY" },
+      hints: oneHint("Ask whether all three rows are independent objects."),
+      evaluate: p => { const s = compact(p); return result([s.includes("for") && s.includes("range(3)"), s.includes("[0]*3") || s.includes("[0,0,0]"), !s.includes("]*3*3"), s.includes("grid=")]); },
+      run: p => ({ output: compact(p).includes("for") ? "[[0, 9, 0], [0, 0, 0], [0, 0, 0]]" : "[[0, 9, 0], [0, 9, 0], [0, 9, 0]]", note: "Sample execution only." })
+    },
+    {
+      id: "bh-r1-q3-dangling-else", title: "Q3 - The Misleading Indent", maxPoints: 30,
+      prompt: `The code below is formatted to suggest one control flow, but C follows a different one. For some values, the printed result surprises the developer.\n\nPatch the control structure so the intended outer if/else relationship is unambiguous.`,
+      ui: { kind: "patch-editor", code: ["if (x > 5)", "    if (x < 8)", "        printf(\"A\");", "else", "    printf(\"B\");"], sampleInput: "x = 10", initialOutput: "B", patchLimit: "CONTROL-FLOW PATCH" },
+      hints: oneHint("In C, an else binds to the nearest unmatched if."),
+      evaluate: p => { const s = compact(p); return result([s.includes("if(x>5){") || s.includes("if(x>5)\n{") || s.includes("}"), s.includes("else"), s.includes("if(x<8)"), s.includes("printf")]); },
+      run: p => ({ output: compact(p).includes("if(x>5){") ? "(no output for x=10 under the intended logic)" : "B", note: "Observe behavior; the site does not reveal an expected result." })
+    },
+    {
+      id: "bh-r1-q4-python-remove", title: "Q4 - The Skipped Values", maxPoints: 30,
+      prompt: `The goal is to remove every even number. The code appears simple, but consecutive matches can survive.\n\nPatch the logic without adding manual index bookkeeping.`,
+      ui: { kind: "patch-editor", code: ["nums = [2, 4, 6, 7, 8]", "for x in nums:", "    if x % 2 == 0:", "        nums.remove(x)", "print(nums)"], sampleInput: "[2, 4, 6, 7, 8]", initialOutput: "[4, 7]", patchLimit: "NO MANUAL INDEX COUNTER" },
+      hints: oneHint("Changing a list while iterating over that same list can skip elements."),
+      evaluate: p => { const s = compact(p); return result([(s.includes("forxinnums[:]") || s.includes("forxinnums.copy()") || s.includes("[xforxinnumsifx%2!=0]")), !s.includes("forxinnums:") || s.includes("nums[:]") || s.includes("copy"), s.includes("%2"), s.includes("nums")]); },
+      run: p => ({ output: (compact(p).includes("nums[:]") || compact(p).includes("copy") || compact(p).includes("ifx%2!=0")) ? "[7]" : "[4, 7]", note: "Sample execution only." })
+    }
+  ]},
 
-Input scores: [-8,-3,-11,-2]
-Expected winner score: -2
-Service returns: 0
+  round2: { title: "Round 2 - Patch It", durationSeconds: 40 * 60, stages: [
+    {
+      id: "bh-r2-q1-binary-search", title: "Q1 - The Search That Never Shrinks", maxPoints: 35,
+      prompt: `A search service passes many requests but can remain active forever when the target is absent. Logs show the same middle position being revisited.\n\nSubmit the minimum patch that guarantees the search interval strictly shrinks after every failed comparison.`,
+      ui: { kind: "patch-editor", code: ["int search(int a[], int n, int target) {", "    int low = 0, high = n - 1;", "    while (low <= high) {", "        int mid = low + (high - low) / 2;", "        if (a[mid] == target) return mid;", "        if (a[mid] < target) low = mid;", "        else high = mid;", "    }", "    return -1;", "}"], sampleInput: "sorted array; target absent", initialOutput: "request does not finish for a boundary case", patchLimit: "CHANGE ONLY TWO ASSIGNMENTS" },
+      hints: oneHint("Once mid is known to be wrong, it must not remain inside the next interval."),
+      evaluate: p => { const s = compact(p); return result([s.includes("low=mid+1"), s.includes("high=mid-1"), s.includes("while(low<=high)"), s.includes("return-1")]); },
+      run: p => ({ output: hasAll(p,["low=mid+1","high=mid-1"]) ? "request completes" : "request may repeat the same midpoint", note: "Sample behavior only." })
+    },
+    {
+      id: "bh-r2-q2-prime-guard", title: "Q2 - The Empty Loop", maxPoints: 35,
+      prompt: `A prime checker passes ordinary positive-number tests. A hidden validation family contains values for which the loop executes zero times, and the function incorrectly returns True.\n\nAdd one guard that fixes the complete invalid family without changing the loop.`,
+      ui: { kind: "patch-editor", code: ["def is_prime(n):", "    for i in range(2, n):", "        if n % i == 0:", "            return False", "    return True"], sampleInput: "n = 1", initialOutput: "True", patchLimit: "ADD ONE GUARD" },
+      hints: oneHint("Prime numbers start at 2."),
+      evaluate: p => { const s = compact(p); return result([s.includes("ifn<2"), s.includes("returnfalse"), s.includes("defis_prime"), s.includes("foriinrange(2,n)")]); },
+      run: p => ({ output: hasAll(p,["ifn<2","returnfalse"]) ? "False" : "True", note: "Sample execution only." })
+    },
+    {
+      id: "bh-r2-q3-c-string", title: "Q3 - It Printed Correctly Once", maxPoints: 35,
+      prompt: `A five-character code sometimes prints correctly and sometimes continues into garbage memory. The same binary behaves differently between machines.\n\nPatch the storage so the string is always valid for %s printing.`,
+      ui: { kind: "patch-editor", code: ["char code[5] = \"HELLO\";", "printf(\"%s\", code);"], sampleInput: "No external input", initialOutput: "HELLO... (may continue into garbage)", patchLimit: "MINIMUM STORAGE PATCH" },
+      hints: oneHint("C strings need room for one character that is not visibly printed."),
+      evaluate: p => { const s = compact(p); return result([s.includes("charcode[6]") || s.includes("charcode[]=\"hello\"") , s.includes("\"hello\""), s.includes("printf(\"%s\",code)"), !s.includes("charcode[5]")]); },
+      run: p => ({ output: (compact(p).includes("code[6]") || compact(p).includes("code[]=\"hello\"")) ? "HELLO" : "HELLO... (memory-dependent)", note: "Sample behavior only." })
+    },
+    {
+      id: "bh-r2-q4-python-truthiness", title: "Q4 - Zero Is Valid", maxPoints: 35,
+      prompt: `A validation function should reject missing values, but numeric zero is valid data. The current implementation rejects a record containing 0.\n\nPatch the predicate so only missing values are rejected.`,
+      ui: { kind: "patch-editor", code: ["def valid(items):", "    return all(items)", "", "print(valid([12, 0, 7]))"], sampleInput: "[12, 0, 7]", initialOutput: "False", patchLimit: "KEEP THE FUNCTION SHORT" },
+      hints: oneHint("Truthiness is broader than 'is missing'."),
+      evaluate: p => { const s = compact(p); return result([s.includes("isnotnone"), s.includes("for") && s.includes("initems"), s.includes("all("), !s.includes("returnall(items)")]); },
+      run: p => ({ output: compact(p).includes("isnotnone") ? "True" : "False", note: "Sample execution only." })
+    }
+  ]},
 
-Code:
-int findMax(int a[], int n) {
-    int max = 0;
-    for (int i=0; i<n; i++)
-        if (a[i] > max) max = a[i];
-    return max;
-}
+  round3: { title: "Round 3 - Hidden Failure", durationSeconds: 50 * 60, stages: [
+    {
+      id: "bh-r3-q1-size-t-loop", title: "Q1 - Countdown That Never Ends", maxPoints: 40,
+      prompt: `A reverse traversal works for several values, but a production run appears to continue forever after reaching index 0. The index type is size_t.\n\nPatch the loop so reverse traversal terminates safely for every valid n > 0.`,
+      ui: { kind: "patch-editor", code: ["for (size_t i = n - 1; i >= 0; i--) {", "    process(a[i]);", "}"], sampleInput: "n = 4", initialOutput: "processes 3,2,1,0 then continues", patchLimit: "SAFE REVERSE LOOP" },
+      hints: oneHint("size_t is unsigned; ask what happens below zero."),
+      evaluate: p => { const s = compact(p); return result([(s.includes("i-->0") || s.includes("i>0") || s.includes("i=n;i-->0")), !s.includes("i>=0"), s.includes("size_t") || s.includes("for("), s.includes("process")]); },
+      run: p => ({ output: (compact(p).includes("i-->0") || compact(p).includes("i>0")) ? "reverse traversal terminates" : "index wraps after zero", note: "Sample behavior only." })
+    },
+    {
+      id: "bh-r3-q2-python-default", title: "Q2 - Data From the Previous Call", maxPoints: 40,
+      prompt: `A helper works on the first request. A later request unexpectedly contains values from the previous call even though no global variable is used.\n\nPatch the function so each call gets independent storage unless the caller explicitly provides a list.`,
+      ui: { kind: "patch-editor", code: ["def collect(x, bucket=[]):", "    bucket.append(x)", "    return bucket", "", "print(collect(1))", "print(collect(2))"], sampleInput: "collect(1), collect(2)", initialOutput: "[1] then [1, 2]", patchLimit: "PRESERVE OPTIONAL ARGUMENT BEHAVIOR" },
+      hints: oneHint("Default argument objects are created once, not once per call."),
+      evaluate: p => { const s = compact(p); return result([s.includes("bucket=none"), s.includes("ifbucketisnone"), s.includes("bucket=[]"), s.includes("bucket.append(x)")]); },
+      run: p => ({ output: hasAll(p,["bucket=none","ifbucketisnone","bucket=[]"]) ? "[1] then [2]" : "[1] then [1, 2]", note: "Sample execution only." })
+    },
+    {
+      id: "bh-r3-q3-c-string-compare", title: "Q3 - Same Text, Different Result", maxPoints: 40,
+      prompt: `Two strings visibly contain the same text, but a permission check sometimes treats them as different. The values may come from separate buffers.\n\nPatch the comparison so it checks string contents rather than storage addresses.`,
+      ui: { kind: "patch-editor", code: ["char roleA[16] = \"admin\";", "char roleB[16];", "strcpy(roleB, \"admin\");", "", "if (roleA == roleB)", "    grant_access();"], sampleInput: "roleA='admin', roleB='admin'", initialOutput: "access may not be granted", patchLimit: "CHANGE THE COMPARISON" },
+      hints: oneHint("Arrays/pointers compared with == do not compare every character."),
+      evaluate: p => { const s = compact(p); return result([s.includes("strcmp(rolea,roleb)==0") || s.includes("!strcmp(rolea,roleb)"), s.includes("strcmp"), !s.includes("rolea==roleb"), s.includes("grant_access")]); },
+      run: p => ({ output: compact(p).includes("strcmp") ? "access granted" : "comparison depends on addresses", note: "Sample behavior only." })
+    },
+    {
+      id: "bh-r3-q4-python-float", title: "Q4 - The Number That Is Almost 0.3", maxPoints: 40,
+      prompt: `A price check occasionally fails even though the displayed arithmetic looks exact.\n\nPatch the comparison so normal floating-point representation error does not reject equivalent values.`,
+      ui: { kind: "patch-editor", code: ["total = 0.1 + 0.2", "if total == 0.3:", "    print(\"accepted\")", "else:", "    print(\"rejected\")"], sampleInput: "0.1 + 0.2", initialOutput: "rejected", patchLimit: "ROBUST NUMERIC COMPARISON" },
+      hints: oneHint("Binary floating-point cannot represent every decimal fraction exactly."),
+      evaluate: p => { const s = compact(p); return result([(s.includes("isclose") || s.includes("abs(total-0.3)<")), (s.includes("math.isclose") || s.includes("abs(")), !s.includes("total==0.3"), s.includes("accepted")]); },
+      run: p => ({ output: (compact(p).includes("isclose") || compact(p).includes("abs(total-0.3)<")) ? "accepted" : "rejected", note: "Sample execution only." })
+    }
+  ]},
 
-Which line/idea creates a value that was never in the contest, and why?`,
-   placeholder:"Example: line 2 or max=0",answers:["line 2","2","max=0","int max = 0"],
-   validate:(a)=>{const s=compact(a);return s==="2"||s.includes("line2")||s.includes("max=0")||s.includes("intmax=0")||(s.includes("max")&&s.includes("initial")&&s.includes("0"))},
-   hints:hints("Look at a value that never appears in the input.","Ask whether max=0 is safe for every possible array.","Initialize from a[0] or a safe lower value."),
-   ui:{kind:"code-lines",code:["int findMax(int a[], int n) {","  int max = 0;","  for (int i=0; i<n; i++) {","    if (a[i] > max)","      max = a[i];","  }","  return max;","}"],choices:["Line 2","Line 3","Line 4","Line 5"]}
-  },
-  {
-   id:"bh-r1-q2-test-expectation",title:"Q2 - Bug or No Bug",type:"bug-or-no-bug",maxPoints:20,
-   prompt:`A QA report flags this function as broken:
+  surprise: { title: "Surprise Bug Drop", durationSeconds: 20 * 60, stages: [
+    {
+      id: "bh-surprise-lambda", title: "Surprise - Three Functions, One Value", maxPoints: 60,
+      prompt: `Three Python callbacks are created in a loop. The developer expects each callback to remember the loop value from the moment it was created, but all callbacks later return the same value.\n\nPatch the callback construction without changing how the callbacks are invoked.`,
+      ui: { kind: "patch-editor", code: ["funcs = []", "for i in range(3):", "    funcs.append(lambda: i)", "", "print([f() for f in funcs])"], sampleInput: "range(3)", initialOutput: "[2, 2, 2]", patchLimit: "CHANGE CALLBACK CONSTRUCTION ONLY" },
+      hints: oneHint("The lambda reads i later; capture the current value at creation time."),
+      evaluate: p => { const s = compact(p); return result([s.includes("lambdai=i:i") || s.includes("lambda",), s.includes("i=i"), s.includes("funcs.append"), !s.includes("lambda:i)")]); },
+      run: p => ({ output: compact(p).includes("i=i") ? "[0, 1, 2]" : "[2, 2, 2]", note: "Sample execution only." })
+    }
+  ]},
 
-def average(a,b):
-    return (a+b)/2
-
-For a=5 and b=8 the program returns 6.5, but the test file expects 6.
-
-The specification only says “ordinary arithmetic mean.”
-
-Where is the bug: code, test expectation, or nowhere?`,
-   placeholder:"A, B or C",answers:["b","test expectation bug","test bug"],
-   validate:(a)=>{const raw=String(a??"").trim().toLowerCase(),s=compact(a);return raw==="b"||raw.startsWith("b -")||raw.startsWith("b-")||(s.includes("test")&&(s.includes("expect")||s.includes("expected"))&&(s.includes("bug")||s.includes("wrong")||s.includes("incorrect")))},
-   hints:hints("Calculate the arithmetic mean manually.","Check whether integer truncation was required.","The test expectation can be wrong too."),
-   ui:{kind:"choices",choices:["A - Code bug","B - Test expectation bug","C - No bug"]}
-  },
-  {
-   id:"bh-r1-q3-flowchart-even",title:"Q3 - Flowchart Fault",type:"flowchart-fault",maxPoints:20,
-   prompt:`A sensor flowchart should label every integer EVEN or ODD. The decision diamond asks “n % 2 == 0 ?” but the YES wire reaches PRINT ODD and the NO wire reaches PRINT EVEN.
-
-With n=8 the decision is TRUE and the wrong label appears.
-
-Do you change the condition, the outputs, or the wires?`,
-   placeholder:"Example: swap branches",answers:["swap branches","swap outputs","yes even no odd","yes->even no->odd","swap output branches"],
-   validate:(a)=>{const s=compact(a);return s.includes("swapbranches")||s.includes("swapoutputbranches")||((s.includes("yes")&&s.includes("even"))&&(s.includes("no")&&s.includes("odd")))},
-   hints:hints("The decision expression is correct.","For n=8 the decision is TRUE.","YES must lead to EVEN."),
-   ui:{kind:"flowchart",nodes:["READ n","n % 2 == 0 ?","YES -> PRINT ODD","NO -> PRINT EVEN"],choices:["Swap output branches","Change condition to n%2==1","No bug"]}
-  },
-  {
-   id:"bh-r1-q4-off-by-one",title:"Q4 - Boundary Trap",type:"faulty-line",maxPoints:20,
-   prompt:`A three-sample packet [4,6,2] is passed to sumArray with n=3. The expected sum is 12, but the program sometimes reads garbage after the last sample:
-
-for (int i=0; i<=n; i++) total += a[i];
-
-Find the smallest boundary fix that guarantees the loop touches only real samples.`,
-   placeholder:"Correct loop condition",answers:["i < n","i<n","for(int i=0;i<n;i++)","i <= n-1","i<=n-1"],
-   validate:(a)=>{const raw=String(a??"").toLowerCase();return /\bi\s*<\s*n\b(?!\s*-\s*\d)/.test(raw)||/\bi\s*<=\s*n\s*-\s*1\b/.test(raw)},
-   hints:hints("Valid indices are 0,1,2.","What happens when i becomes 3?","The fix changes <= to <."),
-   ui:{kind:"code-lines",code:["int total = 0;","for (int i = 0; i <= n; i++) {","  total += a[i];","}"],choices:["i < n","i <= n-1","i < n-1"]}
-  }
- ]},
- round2:{title:"Round 2 - Patch It",durationSeconds:40*60,stages:[
-  {
-   id:"bh-r2-q1-binary-search",title:"Q1 - Binary Search Stuck",type:"minimal-patch",maxPoints:25,
-   prompt:`A search tracker occasionally freezes even though low and high are still valid. The trace shows the same mid appearing again and again.
-
-if (a[mid] < key) low = mid;
-else high = mid;
-
-You may change only these two assignments. What patch guarantees that each failed comparison removes mid from the next search interval?`,
-   placeholder:"low=... , high=...",answers:[],
-   validate:(a)=>includesAll(a,["low=mid+1","high=mid-1"]),
-   hints:hints("The search interval sometimes does not shrink.","If mid is wrong, exclude it from the next interval.","Move one position beyond mid."),
-   ui:{kind:"patch",code:["if (a[mid] < key)","  low = mid;","else","  high = mid;"],fields:["low = ?","high = ?"]}
-  },
-  {
-   id:"bh-r2-q2-prime-hidden-input",title:"Q2 - Test Case Detective",type:"test-case-detective",maxPoints:25,
-   prompt:`A prime checker passes tests for 2, 7 and 9. The specification quietly adds one rule: every n<2 is NOT prime.
-
-def is_prime(n):
-    for i in range(2,n):
-        if n%i==0: return False
-    return True
-
-Among 2,7,9,1 choose the value that exposes the hidden failure, then add the smallest guard that fixes the entire n<2 family.`,
-   placeholder:"Example: 1 | if n < 2: return False",answers:[],
-   validate:(a)=>{const s=compact(a);return s.includes("1")&&s.includes("n<2")&&s.includes("returnfalse")},
-   hints:hints("Try a value where the loop does not execute.","9 is correctly rejected by divisor 3.","The requirement explicitly mentions n<2."),
-   ui:{kind:"choices",choices:["2","7","9","1"],note:"After choosing the input, add the one-line guard in the answer box."}
-  },
-  {
-   id:"bh-r2-q3-lock-threshold",title:"Q3 - State Machine Patch",type:"state-table-patch",maxPoints:25,
-   prompt:`A login system promises: “the third consecutive failure locks the account immediately.” The audit trail says ACTIVE after failures 1, 2 and 3, then LOCKED after failure 4.
-
-Current rule: after incrementing failed, lock only when failed > 3.
-
-What single comparison change makes the audit match the promise?`,
-   placeholder:"Correct condition",answers:["failed >= 3","failed>=3","if failed >= 3","if failed>=3"],
-   hints:hints("The lock happens one failure too late.","Look at the exact boundary value 3.","The update is correct; the comparison is not."),
-   ui:{kind:"state-table",rows:[["1","ACTIVE"],["2","ACTIVE"],["3","ACTIVE (wrong)"],["4","LOCKED"]],choices:["failed >= 3","failed == 4","failed > 2"]}
-  },
-  {
-   id:"bh-r2-q4-even-median",title:"Q4 - Median Index Patch",type:"minimal-patch",maxPoints:25,
-   prompt:`A statistics service already sorts its data. For [2,4,8,10] it reports median 9 instead of 6.
-
-mid=n/2
-return (a[mid] + a[mid+1]) / 2.0
-
-The formula for averaging two values is fine. Which two zero-based indices should be used when n is even?`,
-   placeholder:"Correct return expression",answers:[],
-   validate:(a)=>{const s=compact(a);return s.includes("a[mid-1]")&&s.includes("a[mid]")&&s.includes("2.0")},
-   hints:hints("For four values the middle pair is 4 and 8.","mid is 2 when n=4.","The middle indices are 1 and 2."),
-   ui:{kind:"patch",code:["mid = n / 2","return (a[mid] + a[mid+1]) / 2.0"],fields:["left index = ?","right index = ?"]}
-  }
- ]},
- round3:{title:"Round 3 - Hidden Failure",durationSeconds:50*60,stages:[
-  {
-   id:"bh-r3-q1-username-normalize",title:"Q1 - Hidden Requirement",type:"hidden-requirement",maxPoints:30,
-   prompt:`A duplicate-name guard is bypassed by the new registration "  alice  " even though “Alice” already exists. The written rule says outer spaces do not matter and letter case does not matter.
-
-What normalization must happen before the duplicate comparison?`,
-   placeholder:"Describe the normalization",answers:[],
-   validate:(a)=>{const s=compact(a);return (s.includes("trim")||s.includes("strip"))&&(s.includes("lower")||s.includes("case"))},
-   hints:hints("Remove outside spaces first.","Alice and alice should be equivalent.","Normalize both stored and incoming usernames."),
-   ui:{kind:"cards",cards:["Existing: Alice","Existing: debugger","Existing: BYTEKING","Incoming:   alice  "],choices:["trim only","lowercase only","trim + case normalize"]}
-  },
-  {
-   id:"bh-r3-q2-zero-history-log",title:"Q2 - Log Investigation",type:"log-investigation",maxPoints:30,
-   prompt:`Two users reach the same history endpoint. One has 3 records and gets avg=71.3. The other has 0 records and immediately triggers “division by zero.”
-
-Nothing else fails in the request. From the log alone, identify the broken assumption and the safe guard point.`,
-   placeholder:"Root cause",answers:["count=0","count = 0","division by zero","records=0","empty history"],
-   hints:hints("The failure happens immediately after records=0.","The profile request succeeds.","Any division needs a non-zero denominator."),
-   ui:{kind:"logs",lines:["records=3 -> avg 71.3","records=0 -> ERROR division by zero"],choices:["count=0","bad token","timeout","null id"]}
-  },
-  {
-   id:"bh-r3-q3-multi-bug-sumeven",title:"Q3 - Multi-Bug Challenge",type:"multi-bug",maxPoints:30,
-   prompt:`int sumEven(int a[], int n) {\n    int sum;\n    for (int i = 0; i <= n; i++) {\n        if (a[i] % 2 = 0)\n            sum += a[i];\n    }\n    return sum;\n}\n\nFind ALL bugs. Enter the three corrected ideas/expressions.`,
-   placeholder:"sum=... ; i...n ; %2 ... 0",answers:[],
-   validate:(a)=>{const s=compact(a);return s.includes("sum=0")&&(s.includes("i<n")||s.includes("i<=n-1"))&&s.includes("%2==0")},
-   hints:hints("There is an initialization bug.","There is a boundary bug.","There is an operator bug inside the if."),
-   ui:{kind:"code-lines",code:["int sum;","for (int i=0; i<=n; i++) {","if (a[i] % 2 = 0)","sum += a[i];"],multiSelect:true}
-  },
-  {
-   id:"bh-r3-q4-palindrome-normalize",title:"Q4 - Hidden Text Case",type:"hidden-test",maxPoints:30,
-   prompt:`The palindrome core passes “level”, “radar” and correctly rejects “hello”, yet a hidden sentence “Never odd or even” fails even though the requirement says spaces and case must be ignored.
-
-What preprocessing must happen before the existing reverse comparison?`,
-   placeholder:"Normalization step",answers:[],
-   validate:(a)=>{const s=compact(a);return (s.includes("lower")||s.includes("case"))&&(s.includes("space")||s.includes("replace")||s.includes("remove"))},
-   hints:hints("The reverse comparison itself is fine.","Look at spaces and uppercase letters.","Normalize the string first."),
-   ui:{kind:"test-results",visible:["level PASS","radar PASS","hello PASS"],hidden:["Never odd or even FAIL"]}
-  }
- ]},
- surprise:{title:"Surprise Bug Drop",durationSeconds:20*60,stages:[
-  {
-   id:"bh-surprise-int-overflow",title:"Extreme Value Incident",type:"incident-diagnosis",maxPoints:50,
-   prompt:`A production counter passes 99 tests, then this incident appears:
-
-2147483647 + 1
-Expected: 2147483648
-Actual: -2147483648
-
-Nothing loops and no input is null. Name the failure class and the safe general mitigation.`,
-   placeholder:"Root cause",answers:["overflow","integer overflow","32-bit overflow","32 bit overflow"],
-   hints:hints("2147483647 is a familiar boundary.","The result wraps to the most negative 32-bit value.","Think about integer range."),
-   ui:{kind:"choices",choices:["overflow","off-by-one","null value","loop bug"],note:"Mitigation: wider or checked arithmetic."}
-  }
- ]},
- final:{title:"Final - Critical Debug",durationSeconds:15*60,stages:[
-  {
-   id:"bh-final-second-largest",title:"Critical Debug - Second Largest Distinct",type:"critical-debug",maxPoints:100,
-   prompt:`int secondLargest(int a[], int n) {\n    int largest = 0, second = 0;\n    for (int i = 1; i <= n; i++) {\n        if (a[i] > largest) {\n            largest = a[i];\n            second = largest;\n        }\n    }\n    return second;\n}\n\nVisible tests:\n[8,6,7] -> 7\n[-4,-2,-9] -> -4\n[5,5,4] -> 4\n\nHidden tests: single value, all equal, extreme negative values.\n\nEnter a compact repair summary covering ALL connected bugs.`,
-   placeholder:"Example: safe init; i<n; preserve old largest; ...",answers:[],
-   validate:(a)=>{const s=compact(a);const boundary=s.includes("i<n")||s.includes("loopbound");const safe=s.includes("safeinit")||s.includes("sentinel")||s.includes("a[0]")||s.includes("flag");const preserve=s.includes("oldlargest")||s.includes("preserve")||s.includes("second=largestbefore")||s.includes("updateorder");const distinct=s.includes("distinct")||s.includes("x<largest")||s.includes("duplicate");const noSecond=s.includes("nosecond")||s.includes("notexist")||s.includes("error")||s.includes("flag");return boundary&&safe&&preserve&&distinct&&noSecond},
-   hints:hints("The loop reads one element past the array.","When largest changes, preserve the OLD largest first.","You also need distinct handling and a no-second case."),
-   ui:{kind:"critical",code:["largest=0, second=0","for (i=1; i<=n; i++)","if a[i]>largest","largest=a[i]","second=largest"],tests:["[8,6,7] FAIL","[-4,-2,-9] FAIL","[5,5,4] FAIL","hidden edge cases LOCKED"]}
-  }
- ]}
+  final: { title: "Final - Critical Debug", durationSeconds: 15 * 60, stages: [
+    {
+      id: "bh-final-second-largest", title: "Final - Second Largest Distinct", maxPoints: 100,
+      prompt: `The function below should return the second-largest DISTINCT value. It fails on negative values, duplicates, small arrays and some ordinary inputs.\n\nRepair the implementation. Hidden tests include duplicates, all-negative data, one-element input, all-equal input and extreme integer values.`,
+      ui: { kind: "patch-editor", code: ["int secondLargest(int a[], int n) {", "    int largest = 0, second = 0;", "    for (int i = 1; i <= n; i++) {", "        if (a[i] > largest) {", "            largest = a[i];", "            second = largest;", "        }", "    }", "    return second;", "}"], sampleInput: "multiple hidden datasets", initialOutput: "fails several edge cases", patchLimit: "FULL REPAIR ALLOWED" },
+      hints: oneHint("Fix the boundary and preserve the old largest before replacing it; then handle distinct/no-result cases."),
+      evaluate: p => { const s = compact(p); return result([
+        s.includes("i<n"),
+        (s.includes("int_min") || s.includes("a[0]") || s.includes("haslargest") || s.includes("bool")),
+        (s.includes("second=largest") && (s.indexOf("second=largest") < s.lastIndexOf("largest="))) || s.includes("oldlargest") || s.includes("temp"),
+        (s.includes("!=largest") || s.includes("<largest") || s.includes("distinct")),
+        (s.includes("return") && (s.includes("-1") || s.includes("error") || s.includes("hassecond") || s.includes("bool")))
+      ]); },
+      run: p => ({ output: "Sample run completed. Final correctness is decided only by hidden tests on SUBMIT PATCH.", note: "No expected output or hidden inputs are disclosed." })
+    }
+  ]}
 };

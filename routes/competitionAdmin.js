@@ -258,6 +258,19 @@ function roundDetails(event, team) {
         }
         const started = Boolean(progress.startedAt)
             || Object.values(progress.stages || {}).some(stage => Boolean(stage?.startedAt));
+        const stages = [];
+        for (let index = 1; index <= totalStages; index += 1) {
+            const stage = progress?.stages?.[`stage${index}`] || {};
+            stages.push({
+                stage: index,
+                title: round?.stages?.[index - 1]?.title || `Stage ${index}`,
+                score: Number(stage.score || 0),
+                attempts: Number(stage.attempts || 0),
+                hintsUsed: Array.isArray(stage.hintsUsed) ? stage.hintsUsed.length : 0,
+                startedAt: stage.startedAt || null,
+                completedAt: stage.completedAt || null
+            });
+        }
         return {
             key,
             title: round?.title || key,
@@ -265,6 +278,7 @@ function roundDetails(event, team) {
             completedStages,
             totalStages,
             started,
+            stages,
             completed: Boolean(progress.completedAt) || (totalStages > 0 && completedStages >= totalStages)
         };
     }).filter(item => item.started || item.completed || item.score > 0 || item.key === team.currentRound);
@@ -344,7 +358,19 @@ router.get("/registrations", requireAdmin, async (req, res) => {
                 finalPlaceSource: state?.finalPlaceSource || "auto",
                 violations: Number(state?.security?.violations || 0),
                 locked: Boolean(state?.security?.locked),
-                disqualified: Boolean(state?.security?.disqualified)
+                lockReason: state?.security?.lockReason || "",
+                disqualified: Boolean(state?.security?.disqualified),
+                securityEvents: (state?.security?.events || []).slice(-10).map(event => ({
+                    reason: event.reason || "Security event",
+                    detail: event.detail || "",
+                    at: event.at || null,
+                    unlockedAt: event.unlockedAt || null
+                })),
+                lastSecurityEvent: (state?.security?.events || []).length ? {
+                    reason: state.security.events[state.security.events.length - 1]?.reason || "Security event",
+                    detail: state.security.events[state.security.events.length - 1]?.detail || "",
+                    at: state.security.events[state.security.events.length - 1]?.at || null
+                } : null
             };
         });
 
@@ -356,6 +382,35 @@ router.get("/registrations", requireAdmin, async (req, res) => {
                 ? error.message
                 : "Server error"
         });
+    }
+});
+
+router.get("/security-alerts", requireAdmin, async (req, res) => {
+    try {
+        const teams = await BugHuntTeam.find({ "security.events.0": { $exists: true } }).lean();
+        const alerts = [];
+        for (const team of teams) {
+            for (const event of (team.security?.events || []).slice(-20)) {
+                alerts.push({
+                    id: `${team.registrationId}:${new Date(event.at || 0).getTime()}:${event.reason || "event"}`,
+                    registrationId: team.registrationId,
+                    teamName: team.teamName || "",
+                    members: team.members || [],
+                    reason: event.reason || "Security event",
+                    detail: event.detail || "",
+                    at: event.at || null,
+                    unlockedAt: event.unlockedAt || null,
+                    violations: Number(team.security?.violations || 0),
+                    locked: Boolean(team.security?.locked),
+                    disqualified: Boolean(team.security?.disqualified)
+                });
+            }
+        }
+        alerts.sort((a, b) => new Date(b.at || 0) - new Date(a.at || 0));
+        res.json(alerts.slice(0, 100));
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Server error" });
     }
 });
 

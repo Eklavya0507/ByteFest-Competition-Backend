@@ -1,5 +1,14 @@
-# BYTEFEST 2026 Competition Backend v12
+# BYTEFEST 2026 Competition Backend v15
 
-Active APIs: Bug Hunt and Checkmate.
+Final competition backend for **Bug Hunt + Checkmate**.
 
-Required deployment variables include MONGODB_URI, REGISTRATION_MONGODB_URI, ADMIN_SECRET, BUGHUNT_SECRET and the existing registration/admin configuration. For coordinator unlock use BUGHUNT_COORDINATOR_PASSWORD and CHECKMATE_COORDINATOR_PASSWORD (or COMPETITION_COORDINATOR_PASSWORD for Checkmate fallback).
+## v15 highlights
+- Bug Hunt patch challenges with C/Python puzzle/debugging questions.
+- Hidden-test pass/fail counts without exposing hidden inputs.
+- Unlimited patch retries while the active round remains open; each wrong submission reduces potential score by 5.
+- Optional hint penalty of 10 points.
+- Minimum 5 points for a successfully solved stage after penalties.
+- Team-by-team Bug Hunt progression and qualification readiness.
+- Admin manual rank/final-place fallback remains supported.
+- Admin security alert feed includes team ID, team/member details, reason, detail and timestamp.
+- Printable credentials use the existing approved-registration data; the registration website does not need changes.

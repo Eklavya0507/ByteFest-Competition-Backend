@@ -8,6 +8,7 @@ const { safeEqual } = require("../utils/competitionPassword");
 
 const router = express.Router();
 const MAX_VIOLATIONS = 4;
+const WRONG_ATTEMPT_PENALTY = 5;
 const ORDER = ["round1", "round2", "round3", "surprise"];
 const clean = value => String(value ?? "").trim();
 const normalize = value => clean(value).replace(/\s+/g, " ").toLowerCase();
@@ -300,17 +301,18 @@ function stagePublic(question, progress) {
     return {
         id: question.id,
         title: question.title,
-        type: question.type || "short-answer",
+        type: "patch-challenge",
         maxPoints: question.maxPoints,
         prompt: question.prompt,
-        placeholder: question.placeholder || "Enter answer",
         ui: question.ui || null,
+        attempts: Number(progress.attempts || 0),
+        wrongPenaltyEach: WRONG_ATTEMPT_PENALTY,
         hints: (question.hints || []).map((hint, index) => ({
             number: index + 1,
             penalty: hint.penalty,
             used: progress.hintsUsed.includes(index + 1),
             text: progress.hintsUsed.includes(index + 1) ? hint.text : null,
-            available: index === 0 || progress.hintsUsed.includes(index)
+            available: true
         }))
     };
 }
@@ -434,10 +436,6 @@ router.post("/hint/:number", requireTeam, async (req, res) => {
         if (!hint) return res.status(404).json({ message: "Hint not found" });
 
         const progress = ensureStage(team, team.currentRound, team.currentStage);
-        if (number > 1 && !progress.hintsUsed.includes(number - 1)) {
-            return res.status(409).json({ message: `Use Hint ${number - 1} first` });
-        }
-
         const used = progress.hintsUsed.includes(number);
         if (!used) {
             progress.hintsUsed.push(number);
@@ -448,6 +446,26 @@ router.post("/hint/:number", requireTeam, async (req, res) => {
         }
 
         res.json({ number, text: hint.text, penalty: hint.penalty, chargedNow: !used });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+router.post("/run", requireTeam, async (req, res) => {
+    try {
+        let team = req.bugHuntTeam;
+        const synced = await syncTeam(team);
+        team = synced.team || team;
+        if (synced.eventControl.status !== "running") return res.status(409).json({ message: "Bug Hunt is not running" });
+        if (team.security?.disqualified) return res.status(403).json({ message: "Team is disqualified" });
+        if (team.security?.locked) return res.status(423).json({ message: "Competition is locked" });
+        const config = questions[team.currentRound];
+        const question = config?.stages?.[team.currentStage - 1];
+        if (!question) return res.status(409).json({ message: "No active challenge" });
+        const patch = clean(req.body?.patch);
+        const preview = typeof question.run === "function" ? question.run(patch) : { output: "Sample run completed.", note: "No expected output is shown." };
+        return res.json({ output: preview.output || "", note: preview.note || "Sample execution only. Hidden tests are checked only on submission." });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Server error" });
@@ -473,32 +491,41 @@ router.post("/submit", requireTeam, async (req, res) => {
         const question = config?.stages?.[team.currentStage - 1];
         if (!question) return res.status(409).json({ message: "No active challenge" });
 
-        const answer = clean(req.body?.answer);
-        if (!answer) return res.status(400).json({ message: "Enter an answer" });
+        const patch = clean(req.body?.patch ?? req.body?.answer);
+        if (!patch) return res.status(400).json({ message: "Edit the code and submit your patch" });
 
         const progress = ensureStage(team, team.currentRound, team.currentStage);
         if (progress.completedAt) return res.status(409).json({ message: "Stage already completed" });
 
         progress.attempts += 1;
-        progress.lastAnswer = answer;
-        const accepted = typeof question.validate === "function"
-            ? Boolean(question.validate(answer))
-            : (question.answers || []).some(item => normalize(item) === normalize(answer));
+        progress.lastAnswer = patch;
+        const evaluation = typeof question.evaluate === "function"
+            ? question.evaluate(patch)
+            : { correct: false, passed: 0, total: 4 };
+        const passed = Math.max(0, Number(evaluation?.passed || 0));
+        const total = Math.max(1, Number(evaluation?.total || 4));
 
-        if (!accepted) {
+        if (!evaluation?.correct) {
             team.wrongSubmissions += 1;
             ensureRound(team, team.currentRound).wrongSubmissions += 1;
             team.markModified("progress");
             await team.save();
-            return res.json({ correct: false, attempts: progress.attempts, message: "Answer not accepted. Try again." });
+            return res.json({
+                correct: false,
+                stageFailed: false,
+                passed,
+                total,
+                attempts: progress.attempts,
+                penaltyToDate: progress.attempts * WRONG_ATTEMPT_PENALTY,
+                message: `${passed}/${total} hidden tests passed. Patch rejected. -${WRONG_ATTEMPT_PENALTY} potential points. You may keep trying while the round timer is active.`
+            });
         }
 
         const hintPenalty = progress.hintsUsed.reduce((sum, number) => sum + Number(question.hints?.[number - 1]?.penalty || 0), 0);
-        const wrongPenalty = Math.max(0, progress.attempts - 2) * 5;
-        const earned = Math.max(0, Number(question.maxPoints || 0) - hintPenalty - wrongPenalty);
+        const wrongPenalty = Math.max(0, progress.attempts - 1) * WRONG_ATTEMPT_PENALTY;
+        const earned = Math.max(5, Number(question.maxPoints || 0) - hintPenalty - wrongPenalty);
         const completedAt = new Date();
         const finishedRound = team.currentRound;
-
         progress.completedAt = completedAt;
         progress.score = earned;
         progress.completionMs = progress.startedAt ? completedAt - new Date(progress.startedAt) : null;
@@ -518,39 +545,18 @@ router.post("/submit", requireTeam, async (req, res) => {
         team.markModified("progress");
         await team.save();
 
-        if (finishedRound === "surprise" && completedRound) {
-            await maybeFinalizeQualification();
-        } else if (finishedRound === "final" && completedRound) {
-            await maybeFinalizeFinal();
-        }
+        if (finishedRound === "surprise" && completedRound) await maybeFinalizeQualification();
+        else if (finishedRound === "final" && completedRound) await maybeFinalizeFinal();
 
         const fresh = await BugHuntTeam.findById(team._id);
         const currentRound = fresh?.currentRound || team.currentRound;
-        let message;
-        if (!completedRound) {
-            message = `Correct. +${earned} points. Stage ${team.currentStage} is ready.`;
-        } else if (finishedRound === "surprise") {
-            message = currentRound === "final"
-                ? `Correct. +${earned} points. Qualification complete — your team reached the Final.`
-                : currentRound === "eliminated"
-                    ? `Correct. +${earned} points. Qualification complete.`
-                    : `Correct. +${earned} points. Surprise completed — waiting for the remaining active teams.`;
-        } else if (finishedRound === "final") {
-            message = currentRound === "completed"
-                ? `Correct. +${earned} points. Final result saved.`
-                : `Correct. +${earned} points. Final completed — waiting for the other finalists.`;
-        } else {
-            message = `Correct. +${earned} points. ${questions[currentRound]?.title || "Next round"} is ready.`;
-        }
+        let message = `Patch accepted. ${total}/${total} hidden tests passed. +${earned} points.`;
+        if (!completedRound) message += ` Stage ${fresh?.currentStage || team.currentStage} is ready.`;
+        else if (finishedRound === "surprise") message += currentRound === "final" ? " Qualification complete — your team reached the Final." : currentRound === "eliminated" ? " Qualification complete." : " Waiting for remaining active teams.";
+        else if (finishedRound === "final") message += currentRound === "completed" ? " Final result saved." : " Waiting for other finalists.";
+        else message += ` ${questions[currentRound]?.title || "Next round"} is ready.`;
 
-        res.json({
-            correct: true,
-            earned,
-            completedRound,
-            nextStage: fresh?.currentStage || team.currentStage,
-            currentRound,
-            message
-        });
+        return res.json({ correct: true, earned, passed: total, total, completedRound, nextStage: fresh?.currentStage || team.currentStage, currentRound, message });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: "Server error" });
